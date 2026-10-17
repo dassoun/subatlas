@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SubAtlas" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Fond du logo, avant le premier dessin de l'appli (le thème sombre est celui par défaut). -->
+        <item name="android:windowBackground">#08111C</item>
+    </style>
+
+    <!-- Écran de démarrage système : fond du logo et symbole seul (Android le découpe dans un disque, le nom complet
+         est affiché ensuite par l'appli elle-même). Une fois passé, l'activité retrouve Theme.SubAtlas. -->
+    <style name="Theme.SubAtlas.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#08111C</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_mark</item>
+        <item name="postSplashScreenTheme">@style/Theme.SubAtlas</item>
+    </style>
+</resources>
