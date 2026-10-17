@@ -33,7 +33,24 @@ data class DiveCenter(
     val phone: String = "",
     val website: String = "",
     val notes: String = "",
-)
+    val street: String = "",
+    val addressLine2: String = "",
+    val postalCode: String = "",
+    val city: String = "",
+    val country: String = "",
+) {
+    /** « 13007 Marseille » (l'un ou l'autre selon ce qui est renseigné). */
+    val cityLine: String get() = listOf(postalCode.trim(), city.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+
+    /** Lignes de l'adresse postale, dans l'ordre d'écriture : rue, complément, code postal et ville, pays (avec drapeau). */
+    val addressLines: List<String>
+        get() = listOf(
+            street.trim(),
+            addressLine2.trim(),
+            cityLine,
+            listOfNotNull(countryFlag(country), country.trim().takeIf { it.isNotEmpty() }).joinToString(" "),
+        ).filter { it.isNotEmpty() }
+}
 
 @Serializable
 enum class SiteAccess { SHORE, BOAT }
@@ -111,6 +128,8 @@ data class Dive(
     val startTime: String? = null,
     val endTime: String? = null,
     val tanks: List<Tank> = listOf(Tank()),
+    /** Profondeur moyenne de la plongée, avec les bouteilles et la durée : permet de calculer le SAC. */
+    val avgDepthMeters: Double? = null,
     val waterTempC: Double? = null,
     val visibilityMeters: Int? = null,
     val weightKg: Double? = null,
@@ -127,6 +146,19 @@ data class Dive(
     val notes: String = "",
 ) {
     val maxDepthMeters: Double? get() = tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()
+
+    /**
+     * SAC (consommation à la surface, en L/min) = gaz consommé / (durée × pression absolue moyenne), avec une pression
+     * absolue de 1 + profondeur moyenne / 10 bar. Il faut la durée, la profondeur moyenne et, pour au moins une bouteille,
+     * le volume et les deux pressions.
+     */
+    val sacLitersPerMin: Double?
+        get() {
+            val minutes = durationMinutes?.takeIf { it > 0 } ?: return null
+            val avg = avgDepthMeters ?: return null
+            val used = tanks.mapNotNull { it.consumedLiters }.takeIf { it.isNotEmpty() }?.sum()?.takeIf { it > 0 } ?: return null
+            return used / (minutes * (1.0 + avg / 10.0))
+        }
 
     /** Durée en minutes ; une fin « avant » le début est lue comme passant minuit. */
     val durationMinutes: Int?

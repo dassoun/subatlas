@@ -119,6 +119,9 @@ internal fun CenterList(state: AppState, pad: PaddingValues, onOpen: (Long) -> U
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(center.name, style = MaterialTheme.typography.titleMedium)
+                        listOf(center.cityLine, center.country).filter { it.isNotBlank() }.joinToString(" · ")
+                            .takeIf { it.isNotEmpty() }
+                            ?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                         Text(formatCoords(center.latitude, center.longitude), style = MaterialTheme.typography.bodySmall)
                         val contact = listOf(center.phone, center.email).filter { it.isNotBlank() }.joinToString(" · ")
                         if (contact.isNotEmpty()) Text(contact, style = MaterialTheme.typography.bodySmall)
@@ -145,6 +148,10 @@ internal fun CenterDetailView(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(center.name, style = MaterialTheme.typography.headlineSmall)
+        if (center.addressLines.isNotEmpty()) {
+            Text(s.addressLabel, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            center.addressLines.forEach { Text(it) }
+        }
         Text(s.position(formatCoords(center.latitude, center.longitude)))
         if (center.phone.isNotBlank()) Text(s.phoneLine(center.phone))
         if (center.email.isNotBlank()) Text(s.emailLine(center.email))
@@ -197,6 +204,11 @@ internal fun CenterForm(
     var email by remember { mutableStateOf(existing?.email ?: "") }
     var website by remember { mutableStateOf(existing?.website ?: "") }
     var notes by remember { mutableStateOf(existing?.notes ?: "") }
+    var street by remember { mutableStateOf(existing?.street ?: "") }
+    var addressLine2 by remember { mutableStateOf(existing?.addressLine2 ?: "") }
+    var postalCode by remember { mutableStateOf(existing?.postalCode ?: "") }
+    var city by remember { mutableStateOf(existing?.city ?: "") }
+    var country by remember { mutableStateOf(existing?.country ?: "") }
 
     val latVal = lat.replace(',', '.').toDoubleOrNull()
     val lonVal = lon.replace(',', '.').toDoubleOrNull()
@@ -212,6 +224,32 @@ internal fun CenterForm(
         OutlinedTextField(
             name, { name = it }, label = { Text(s.centerName) }, singleLine = true,
             modifier = Modifier.fillMaxWidth(),
+        )
+        Text(s.addressLabel, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        OutlinedTextField(
+            street, { street = it }, label = { Text(s.streetField) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            addressLine2, { addressLine2 = it }, label = { Text(s.addressLine2Field) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                postalCode, { postalCode = it }, label = { Text(s.postalCodeField, maxLines = 1) }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                modifier = Modifier.weight(0.4f),
+            )
+            OutlinedTextField(
+                city, { city = it }, label = { Text(s.cityField) }, singleLine = true,
+                modifier = Modifier.weight(0.6f),
+            )
+        }
+        CountryField(
+            country, { country = it },
+            remember(state.sites.size, state.centers.size) {
+                (state.sites.map { it.country } + state.centers.map { it.country }).filter { it.isNotBlank() }.distinct()
+            },
         )
         GpsFields(lat, lon, { lat = it }, { lon = it }, location)
         OutlinedTextField(
@@ -248,6 +286,11 @@ internal fun CenterForm(
                         email = email.trim(),
                         website = website.trim(),
                         notes = notes.trim(),
+                        street = street.trim(),
+                        addressLine2 = addressLine2.trim(),
+                        postalCode = postalCode.trim(),
+                        city = city.trim(),
+                        country = country.trim(),
                     ),
                 )
                 onDone()

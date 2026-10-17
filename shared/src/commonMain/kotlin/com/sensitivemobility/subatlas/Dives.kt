@@ -194,6 +194,9 @@ private fun AppState.sortedDives(sort: DiveSort): List<Dive> {
             dives.sortedWith(compareBy<Dive> { country(it).isEmpty() }.thenBy { country(it) }.thenBy { siteName(it) }.then(diveOrder))
         DiveSort.DEPTH_DESC -> dives.sortedWith(compareByDescending<Dive> { it.maxDepthMeters ?: -1.0 }.then(diveOrder))
         DiveSort.DURATION_DESC -> dives.sortedWith(compareByDescending<Dive> { it.durationMinutes ?: -1 }.then(diveOrder))
+        // Les plongées sans SAC calculable passent à la fin.
+        DiveSort.SAC_ASC ->
+            dives.sortedWith(compareBy<Dive> { it.sacLitersPerMin == null }.thenBy { it.sacLitersPerMin ?: 0.0 }.then(diveOrder))
     }
 }
 
@@ -209,14 +212,15 @@ private fun Dive.suitSummary(s: Strings): String? {
 /** Ligne de résumé de la liste : horaires, profondeur max, eau, combinaison, volumes, lestage. */
 private fun Dive.listSummary(s: Strings): String {
     val volumes = tanks.mapNotNull { it.volumeLiters }.takeIf { it.isNotEmpty() }
-        ?.joinToString(" + ") { formatNum(it) }?.let { "$it L" }
+        ?.joinToString(" + ") { formatNum(it) }?.let { "$it\u00A0L" }
     return listOfNotNull(
         timeRangeText(s),
-        maxDepthMeters?.let { "max ${formatNum(it)} m" },
-        waterTempC?.let { "${formatNum(it)} °C" },
+        maxDepthMeters?.let { "max\u00A0${formatNum(it)}\u00A0m" },
+        waterTempC?.let { "${formatNum(it)}\u00A0°C" },
         suitSummary(s),
         volumes,
-        weightKg?.let { "${formatNum(it)} kg" },
+        weightKg?.let { "${formatNum(it)}\u00A0kg" },
+        sacLitersPerMin?.let { "SAC\u00A0${formatNum(round(it * 10) / 10)}\u00A0L/min" },
     ).joinToString(" · ")
 }
 
@@ -278,6 +282,7 @@ internal fun DiveDetailView(
         dive.timeRangeText(s)?.let { Text(it) }
         dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
         dive.maxDepthMeters?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
+        dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
 
         dive.tanks.forEachIndexed { i, tank ->
             Card(
@@ -294,6 +299,13 @@ internal fun DiveDetailView(
             }
         }
 
+        dive.sacLitersPerMin?.let {
+            Text(
+                s.labelled(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min"),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         dive.waterTempC?.let { Text(s.labelled(s.waterTemp, "${formatNum(it)} °C")) }
         dive.visibilityMeters?.let { Text(s.labelled(s.visibility, "$it m")) }
         dive.weightKg?.let { Text(s.labelled(s.weight, "${formatNum(it)} kg")) }
@@ -402,6 +414,7 @@ internal fun DiveForm(
             addAll(initial)
         }
     }
+    var avgDepth by remember { mutableStateOf(existing?.avgDepthMeters?.let(::formatNum) ?: "") }
     var waterTemp by remember { mutableStateOf(existing?.waterTempC?.let(::formatNum) ?: "") }
     var visibility by remember { mutableStateOf(existing?.visibilityMeters?.toString() ?: "") }
     var weight by remember { mutableStateOf(existing?.weightKg?.let(::formatNum) ?: "") }
@@ -453,7 +466,8 @@ internal fun DiveForm(
         },
     )
 
-    val extrasOk = (waterTemp.isBlank() || waterTemp.toDec() != null) &&
+    val extrasOk = (avgDepth.isBlank() || avgDepth.toDec() != null) &&
+        (waterTemp.isBlank() || waterTemp.toDec() != null) &&
         (visibility.isBlank() || visibility.trim().toIntOrNull() != null) &&
         (weight.isBlank() || weight.toDec() != null) &&
         (thickness.isBlank() || thickness.toDec() != null)
@@ -527,6 +541,8 @@ internal fun DiveForm(
             PickerField(s.startTime, startTime ?: s.notSet, Modifier.weight(1f)) { pickingTime = true }
             PickerField(s.endTime, endTime ?: s.notSet, Modifier.weight(1f)) { pickingTime = false }
         }
+        NumField(s.avgDepthLabel, avgDepth, { avgDepth = it }, Modifier.fillMaxWidth(), error = avgDepth.isNotBlank() && avgDepth.toDec() == null, unit = "m")
+        Text(s.avgDepthHint, style = MaterialTheme.typography.bodySmall)
 
         // --- Bouteilles
         Text(s.tanksSection, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -614,6 +630,7 @@ internal fun DiveForm(
                         startTime = startTime,
                         endTime = endTime,
                         tanks = tanks.map { it.toTank() },
+                        avgDepthMeters = avgDepth.toDec(),
                         waterTempC = waterTemp.toDec(),
                         visibilityMeters = visibility.trim().toIntOrNull(),
                         weightKg = weight.toDec(),

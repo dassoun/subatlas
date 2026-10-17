@@ -10,7 +10,7 @@ enum class AppLanguage { SYSTEM, FR, EN }
 
 /** Tri de la liste des plongées. */
 @Serializable
-enum class DiveSort { DATE_DESC, DATE_ASC, SITE, COUNTRY, DEPTH_DESC, DURATION_DESC }
+enum class DiveSort { DATE_DESC, DATE_ASC, SITE, COUNTRY, DEPTH_DESC, DURATION_DESC, SAC_ASC }
 
 /** Préférences de l'utilisateur (enregistrées dans `settings.json`, hors des sauvegardes de données). */
 @Serializable

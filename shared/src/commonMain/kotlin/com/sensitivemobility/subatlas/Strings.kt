@@ -77,6 +77,11 @@ interface Strings {
     val email: String
     val website: String
     val centerNotesField: String
+    val addressLabel: String
+    val streetField: String
+    val addressLine2Field: String
+    val postalCodeField: String
+    val cityField: String
     val invalidEmail: String
     fun phoneLine(phone: String): String
     fun emailLine(email: String): String
@@ -153,6 +158,9 @@ interface Strings {
     val pressureStart: String
     val pressureEnd: String
     val depthLabel: String
+    val avgDepthLabel: String
+    val avgDepthHint: String
+    val sacLabel: String
     val conditionsSection: String
     val waterTemp: String
     val visibility: String
@@ -275,6 +283,11 @@ object FrStrings : Strings {
     override val email = "E-mail"
     override val website = "Site web"
     override val centerNotesField = "Notes (tarifs, horaires, langues parlées…)"
+    override val addressLabel = "Adresse"
+    override val streetField = "Numéro et rue"
+    override val addressLine2Field = "Complément d'adresse"
+    override val postalCodeField = "Code postal"
+    override val cityField = "Ville"
     override val invalidEmail = "Adresse e-mail invalide"
     override fun phoneLine(phone: String) = "Téléphone : $phone"
     override fun emailLine(email: String) = "E-mail : $email"
@@ -317,6 +330,7 @@ object FrStrings : Strings {
         DiveSort.COUNTRY -> "Pays"
         DiveSort.DEPTH_DESC -> "Profondeur max"
         DiveSort.DURATION_DESC -> "Durée"
+        DiveSort.SAC_ASC -> "SAC (croissant)"
     }
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
@@ -370,6 +384,9 @@ object FrStrings : Strings {
     override val pressureStart = "Pression début"
     override val pressureEnd = "Pression fin"
     override val depthLabel = "Profondeur max"
+    override val avgDepthLabel = "Profondeur moyenne"
+    override val avgDepthHint = "Avec les pressions, le volume des bouteilles et la durée, elle permet de calculer votre SAC (consommation à la surface)."
+    override val sacLabel = "SAC"
     override val conditionsSection = "Conditions et matériel"
     override val waterTemp = "Température de l'eau"
     override val visibility = "Visibilité"
@@ -509,6 +526,11 @@ object EnStrings : Strings {
     override val email = "Email"
     override val website = "Website"
     override val centerNotesField = "Notes (prices, hours, languages spoken…)"
+    override val addressLabel = "Address"
+    override val streetField = "Street address"
+    override val addressLine2Field = "Address line 2"
+    override val postalCodeField = "Postal code"
+    override val cityField = "City"
     override val invalidEmail = "Invalid email address"
     override fun phoneLine(phone: String) = "Phone: $phone"
     override fun emailLine(email: String) = "Email: $email"
@@ -551,6 +573,7 @@ object EnStrings : Strings {
         DiveSort.COUNTRY -> "Country"
         DiveSort.DEPTH_DESC -> "Max depth"
         DiveSort.DURATION_DESC -> "Duration"
+        DiveSort.SAC_ASC -> "SAC (low to high)"
     }
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
@@ -604,6 +627,9 @@ object EnStrings : Strings {
     override val pressureStart = "Start pressure"
     override val pressureEnd = "End pressure"
     override val depthLabel = "Max depth"
+    override val avgDepthLabel = "Average depth"
+    override val avgDepthHint = "Together with the pressures, the tank volumes and the duration, it lets the app compute your SAC (surface air consumption)."
+    override val sacLabel = "SAC"
     override val conditionsSection = "Conditions and gear"
     override val waterTemp = "Water temperature"
     override val visibility = "Visibility"
