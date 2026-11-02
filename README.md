@@ -27,8 +27,17 @@ Boîte à outils pour plongeurs — Kotlin Multiplatform + Compose Multiplatform
    - `CFBundleURLTypes` avec le schéma `subatlas` (liens de plongée partagée `subatlas://dive?d=…`).
 
 ## Partage d'une plongée avec un binôme
-Le message de partage contient un lien `subatlas://dive?d=…` (données de la plongée encodées) et l'adresse de
-téléchargement de l'appli (`APP_DOWNLOAD_URL` dans `Sharing.kt`, à remplacer par les adresses des stores une fois
-l'appli publiée). Les liens à schéma personnalisé ne sont pas toujours cliquables dans les messageries : l'écran
-« Plongées » propose donc aussi « Coller une plongée reçue ». Pour des liens https cliquables partout (avec renvoi
-automatique vers le store si l'appli est absente), il faudra un nom de domaine (Android App Links / iOS Universal Links).
+Le message de partage contient un lien `https://dassoun.github.io/subatlas/dive.html#…` (constante `SHARE_PAGE_URL` dans
+`Sharing.kt`). La plongée voyage dans la partie après `#`, qui n'est jamais envoyée à un serveur. La page (dossier `docs/`)
+affiche un résumé, ouvre SubAtlas si l'appli est installée (Android : lien `intent://` avec repli vers le store ; iOS :
+schéma `subatlas://`) et propose sinon de la télécharger. Si le lien ne s'ouvre pas, l'écran « Plongées » propose aussi
+« Coller une plongée reçue ».
+
+**Mise en ligne de la page** (une fois) : pousser le dossier `docs/`, puis sur GitHub : *Settings → Pages → Build and
+deployment → Deploy from a branch → `main` / `/docs`*. La page est alors servie sur
+`https://dassoun.github.io/subatlas/dive.html` (un dépôt privé exige un compte GitHub payant pour Pages).
+
+**Avant la publication de l'appli** : renseigner `PLAY_STORE` / `APP_STORE` en haut du script de `docs/dive.html` une
+fois les fiches des stores créées. Pour ouvrir l'appli directement depuis un lien https (sans passer par le bouton de la
+page), il faudra un nom de domaine à soi (Android App Links et iOS Universal Links exigent un fichier de vérification à la
+racine du domaine, ce que `github.io` ne permet pas pour un dépôt de projet).

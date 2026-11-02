@@ -41,6 +41,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -138,6 +139,7 @@ internal fun DiveList(
     val s = LocalStrings.current
     var pasting by remember { mutableStateOf(false) }
     val sort = state.settings.diveSort
+    val descending = state.settings.diveSortDescending
     Column(Modifier.fillMaxSize().padding(pad)) {
         if (state.dives.isEmpty()) Text(s.noDives, modifier = Modifier.padding(16.dp))
         if (state.dives.size > 1) {
@@ -146,10 +148,20 @@ internal fun DiveList(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 DiveSort.entries.forEach { option ->
+                    val active = sort == option
                     FilterChip(
-                        selected = sort == option,
-                        onClick = { state.updateSettings { it.copy(diveSort = option) } },
-                        label = { Text(s.sortLabel(option)) },
+                        selected = active,
+                        // Un critère inactif s'active ; s'il est déjà actif, un nouvel appui inverse le sens.
+                        onClick = {
+                            state.updateSettings {
+                                it.copy(
+                                    diveSort = option,
+                                    diveSortDescending = if (active) !descending else option.defaultDescending(),
+                                )
+                            }
+                        },
+                        // Flèche vers le bas : décroissant ; vers le haut : croissant.
+                        label = { Text(s.sortLabel(option) + if (active) (if (descending) " \u2193" else " \u2191") else "") },
                     )
                 }
             }
@@ -159,7 +171,7 @@ internal fun DiveList(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.sortedDives(sort), key = { it.id }) { dive ->
+            items(state.sortedDives(sort, descending), key = { it.id }) { dive ->
                 Card(
                     onClick = { onOpen(dive.id) },
                     modifier = Modifier.fillMaxWidth(),
@@ -182,21 +194,25 @@ internal fun DiveList(
     if (pasting) PasteSharedDialog(onDismiss = { pasting = false }) { pasting = false; onShared(it) }
 }
 
-/** Tri choisi pour la liste ; à égalité, la plus récente d'abord. */
-private fun AppState.sortedDives(sort: DiveSort): List<Dive> {
+/**
+ * Tri choisi pour la liste. Les plongées sans valeur pour le critère (pas de SAC, de durée…) restent à la fin quel que
+ * soit le sens ; à égalité, la plus récente d'abord.
+ */
+private fun AppState.sortedDives(sort: DiveSort, descending: Boolean): List<Dive> {
+    fun <K : Comparable<K>> by(key: (Dive) -> K?): List<Dive> {
+        val (known, unknown) = dives.sortedWith(diveOrder).partition { key(it) != null }
+        val ascending = compareBy<Dive> { key(it)!! }
+        return known.sortedWith(if (descending) ascending.reversed() else ascending) + unknown
+    }
     fun siteName(d: Dive) = site(d.siteId)?.name?.lowercase().orEmpty()
     fun country(d: Dive) = site(d.siteId)?.country?.lowercase().orEmpty()
     return when (sort) {
-        DiveSort.DATE_DESC -> dives.sortedWith(diveOrder)
-        DiveSort.DATE_ASC -> dives.sortedWith(diveOrder.reversed())
-        DiveSort.SITE -> dives.sortedWith(compareBy<Dive> { siteName(it) }.then(diveOrder))
-        DiveSort.COUNTRY ->
-            dives.sortedWith(compareBy<Dive> { country(it).isEmpty() }.thenBy { country(it) }.thenBy { siteName(it) }.then(diveOrder))
-        DiveSort.DEPTH_DESC -> dives.sortedWith(compareByDescending<Dive> { it.maxDepthMeters ?: -1.0 }.then(diveOrder))
-        DiveSort.DURATION_DESC -> dives.sortedWith(compareByDescending<Dive> { it.durationMinutes ?: -1 }.then(diveOrder))
-        // Les plongées sans SAC calculable passent à la fin.
-        DiveSort.SAC_ASC ->
-            dives.sortedWith(compareBy<Dive> { it.sacLitersPerMin == null }.thenBy { it.sacLitersPerMin ?: 0.0 }.then(diveOrder))
+        DiveSort.DATE -> by { it.date + " " + it.startTime.orEmpty() }
+        DiveSort.SITE -> by { siteName(it).takeIf { n -> n.isNotBlank() } }
+        DiveSort.COUNTRY -> by { d -> country(d).takeIf { it.isNotBlank() }?.let { it + "|" + siteName(d) } }
+        DiveSort.DEPTH -> by { it.maxDepth }
+        DiveSort.DURATION -> by { it.durationMinutes }
+        DiveSort.SAC -> by { it.sacLitersPerMin }
     }
 }
 
@@ -215,7 +231,7 @@ private fun Dive.listSummary(s: Strings): String {
         ?.joinToString(" + ") { formatNum(it) }?.let { "$it\u00A0L" }
     return listOfNotNull(
         timeRangeText(s),
-        maxDepthMeters?.let { "max\u00A0${formatNum(it)}\u00A0m" },
+        maxDepth?.let { "max\u00A0${formatNum(it)}\u00A0m" },
         waterTempC?.let { "${formatNum(it)}\u00A0°C" },
         suitSummary(s),
         volumes,
@@ -244,7 +260,7 @@ internal fun SiteDivesSection(dives: List<Dive>, onOpen: (Long) -> Unit) {
                 Text(s.dateText(d.date), style = MaterialTheme.typography.titleSmall)
                 val details = listOfNotNull(
                     d.timeRangeText(s),
-                    d.maxDepthMeters?.let { "max ${formatNum(it)} m" },
+                    d.maxDepth?.let { "max ${formatNum(it)} m" },
                 ).joinToString(" · ")
                 if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall)
             }
@@ -268,7 +284,8 @@ internal fun DiveDetailView(
     var confirm by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     val site = state.site(dive.siteId)
-    val canShare = site != null && dive.buddy.isNotBlank() && (dive.buddyPhone.isNotBlank() || dive.buddyEmail.isNotBlank())
+    val recipients = dive.shareRecipients
+    val canShare = site != null && recipients.isNotEmpty()
     Column(
         Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -279,9 +296,13 @@ internal fun DiveDetailView(
                 SiteLine(site, MaterialTheme.typography.titleMedium)
             }
         }
+        dive.kind?.let { k ->
+            val kindText = listOfNotNull(s.diveKind(k), dive.kindOther.takeIf { k == DiveKind.OTHER && it.isNotBlank() })
+            Text(s.labelled(s.diveKindLabel, kindText.joinToString(" · ")))
+        }
         dive.timeRangeText(s)?.let { Text(it) }
         dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
-        dive.maxDepthMeters?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
+        dive.maxDepth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
         dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
 
         dive.tanks.forEachIndexed { i, tank ->
@@ -293,8 +314,15 @@ internal fun DiveDetailView(
                     Text("${s.tankTitle(i + 1)} · ${tank.gasLabel(s)}", style = MaterialTheme.typography.titleSmall)
                     tank.volumeLiters?.let { Text(s.labelled(s.volume, "${formatNum(it)} L")) }
                     tank.pressureText()?.let { Text(it) }
-                    tank.maxDepthMeters?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
+                    tank.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
+                    tank.usedMinutes?.let { Text(s.labelled(s.usedMinutesLabel, s.minutesShort(it))) }
                     tank.consumedLiters?.let { Text(s.consumedLine(round(it).toInt())) }
+                    // Avec plusieurs bouteilles, chacune a son SAC (si on connaît sa durée d'utilisation).
+                    if (dive.tanks.size > 1) {
+                        tank.sacLitersPerMin(null, dive.avgDepthMeters)?.let {
+                            Text(s.labelled(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min"), color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
             }
         }
@@ -316,6 +344,7 @@ internal fun DiveDetailView(
         ).joinToString(" · ")
         if (suitText.isNotEmpty()) Text(s.labelled(s.suit, suitText))
         if (dive.buddy.isNotBlank()) Text(s.labelled(s.buddy, dive.buddy))
+        if (dive.group.isNotEmpty()) Text(s.labelled(s.groupSection, dive.group.joinToString(", ") { it.name }))
         if (dive.notes.isNotBlank()) Text(s.notesLine(dive.notes))
 
         val lat = site?.latitude
@@ -327,13 +356,13 @@ internal fun DiveDetailView(
         }
         if (canShare) {
             OutlinedButton(onClick = { sharing = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(s.shareButton(dive.buddy))
+                Text(if (recipients.size == 1) s.shareButton(recipients[0].name) else s.shareWithPeople)
             }
         }
         Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text(s.edit) }
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
     }
-    if (sharing && site != null) ShareDiveDialog(dive, site, actions) { sharing = false }
+    if (sharing && site != null) ShareDiveDialog(dive, site, actions, recipients) { sharing = false }
     if (confirm) {
         ConfirmDialog(
             s.confirmDeleteDive(site?.name ?: "?", s.dateText(dive.date)),
@@ -352,7 +381,8 @@ private data class TankForm(
     val he: String = "0",
     val pStart: String = "",
     val pEnd: String = "",
-    val depth: String = "",
+    val avgDepth: String = "",
+    val minutes: String = "",
 ) {
     private val o2Val get() = o2.trim().toIntOrNull()
     private val heVal get() = he.trim().toIntOrNull()
@@ -362,8 +392,9 @@ private data class TankForm(
     val heOk get() = heVal?.let { it in 0..99 && it + (o2Val ?: 0) <= 100 } == true
     val pStartOk get() = pStart.isBlank() || pStart.trim().toIntOrNull() != null
     val pEndOk get() = pEnd.isBlank() || pEnd.trim().toIntOrNull() != null
-    val depthOk get() = depth.isBlank() || depth.toDec() != null
-    val valid get() = volumeOk && o2Ok && heOk && pStartOk && pEndOk && depthOk
+    val avgDepthOk get() = avgDepth.isBlank() || avgDepth.toDec() != null
+    val minutesOk get() = minutes.isBlank() || (minutes.trim().toIntOrNull() ?: 0) > 0
+    val valid get() = volumeOk && o2Ok && heOk && pStartOk && pEndOk && avgDepthOk && minutesOk
 
     fun toTank() = Tank(
         volumeLiters = volume.toDec(),
@@ -371,7 +402,8 @@ private data class TankForm(
         hePercent = heVal ?: 0,
         pressureStartBar = pStart.trim().toIntOrNull(),
         pressureEndBar = pEnd.trim().toIntOrNull(),
-        maxDepthMeters = depth.toDec(),
+        avgDepthMeters = avgDepth.toDec(),
+        usedMinutes = minutes.trim().toIntOrNull(),
     )
 }
 
@@ -381,12 +413,27 @@ private fun Tank.toForm() = TankForm(
     he = hePercent.toString(),
     pStart = pressureStartBar?.toString() ?: "",
     pEnd = pressureEndBar?.toString() ?: "",
-    depth = maxDepthMeters?.let(::formatNum) ?: "",
+    avgDepth = avgDepthMeters?.let(::formatNum) ?: "",
+    minutes = usedMinutes?.toString() ?: "",
 )
+
+/** Saisie d'une personne de la palanquée. */
+private data class PersonForm(
+    val id: Long,
+    val name: String = "",
+    val fromContacts: Boolean = false,
+    val phone: String = "",
+    val email: String = "",
+    /** Nom choisi dans les suggestions : s'il est modifié ensuite, le contact est détaché. */
+    val picked: String? = null,
+) {
+    val canShare get() = name.isNotBlank() && fromContacts && (phone.isNotBlank() || email.isNotBlank())
+    fun toPerson() = Person(name.trim(), fromContacts, phone, email)
+}
 
 private fun String.toDec(): Double? = trim().replace(',', '.').toDoubleOrNull()
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun DiveForm(
     state: AppState,
@@ -414,7 +461,17 @@ internal fun DiveForm(
             addAll(initial)
         }
     }
+    var maxDepth by remember { mutableStateOf(existing?.maxDepth?.let(::formatNum) ?: "") }
     var avgDepth by remember { mutableStateOf(existing?.avgDepthMeters?.let(::formatNum) ?: "") }
+    var kind by remember { mutableStateOf(existing?.kind) }
+    var kindOther by remember { mutableStateOf(existing?.kindOther ?: "") }
+    val group = remember {
+        mutableStateListOf<PersonForm>().apply {
+            existing?.group?.forEach { add(PersonForm(state.newId(), it.name, it.fromContacts, it.phone, it.email, it.name)) }
+        }
+    }
+    var shareGroupAfter by remember { mutableStateOf(false) }
+    var shareList by remember { mutableStateOf<List<Person>>(emptyList()) }
     var waterTemp by remember { mutableStateOf(existing?.waterTempC?.let(::formatNum) ?: "") }
     var visibility by remember { mutableStateOf(existing?.visibilityMeters?.toString() ?: "") }
     var weight by remember { mutableStateOf(existing?.weightKg?.let(::formatNum) ?: "") }
@@ -466,7 +523,8 @@ internal fun DiveForm(
         },
     )
 
-    val extrasOk = (avgDepth.isBlank() || avgDepth.toDec() != null) &&
+    val extrasOk = (maxDepth.isBlank() || maxDepth.toDec() != null) &&
+        (avgDepth.isBlank() || avgDepth.toDec() != null) &&
         (waterTemp.isBlank() || waterTemp.toDec() != null) &&
         (visibility.isBlank() || visibility.trim().toIntOrNull() != null) &&
         (weight.isBlank() || weight.toDec() != null) &&
@@ -541,6 +599,65 @@ internal fun DiveForm(
             PickerField(s.startTime, startTime ?: s.notSet, Modifier.weight(1f)) { pickingTime = true }
             PickerField(s.endTime, endTime ?: s.notSet, Modifier.weight(1f)) { pickingTime = false }
         }
+
+        // --- Type de plongée (et palanquée pour l'encadrement et l'enseignement)
+        Text(s.diveKindLabel, style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DiveKind.entries.forEach { k ->
+                FilterChip(
+                    selected = kind == k,
+                    // Re-toucher le choix en cours le retire.
+                    onClick = { kind = if (kind == k) null else k },
+                    label = { Text(s.diveKind(k)) },
+                )
+            }
+        }
+        if (kind == DiveKind.OTHER) {
+            OutlinedTextField(kindOther, { kindOther = it }, label = { Text(s.kindOtherField) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+        if (kind?.hasGroup == true) {
+            Text(s.groupSection, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            group.forEachIndexed { i, person ->
+                key(person.id) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Box(Modifier.weight(1f)) {
+                            BuddyField(
+                                state = state,
+                                contacts = contacts,
+                                name = person.name,
+                                label = s.personField,
+                                onName = {
+                                    // Retaper le nom après un choix dans le répertoire détache le contact.
+                                    val same = it == person.picked
+                                    group[i] = person.copy(
+                                        name = it,
+                                        fromContacts = same && person.fromContacts,
+                                        phone = if (same) person.phone else "",
+                                        email = if (same) person.email else "",
+                                    )
+                                },
+                                onPick = { name, phone, email, fromContacts ->
+                                    group[i] = person.copy(name = name, picked = name, fromContacts = fromContacts, phone = phone, email = email)
+                                },
+                            )
+                        }
+                        TextButton(onClick = { group.removeAt(i) }) { Text("\u2715") }
+                    }
+                }
+            }
+            OutlinedButton(onClick = { group.add(PersonForm(state.newId())) }, modifier = Modifier.fillMaxWidth()) {
+                Text(s.addPerson)
+            }
+            if (group.any { it.canShare }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(shareGroupAfter, { shareGroupAfter = it })
+                    Text(s.shareGroupCheckbox, Modifier.clickable { shareGroupAfter = !shareGroupAfter })
+                }
+            }
+        }
+
+        // --- Profondeurs
+        NumField(s.depthLabel, maxDepth, { maxDepth = it }, Modifier.fillMaxWidth(), error = maxDepth.isNotBlank() && maxDepth.toDec() == null, unit = "m")
         NumField(s.avgDepthLabel, avgDepth, { avgDepth = it }, Modifier.fillMaxWidth(), error = avgDepth.isNotBlank() && avgDepth.toDec() == null, unit = "m")
         Text(s.avgDepthHint, style = MaterialTheme.typography.bodySmall)
 
@@ -551,6 +668,7 @@ internal fun DiveForm(
                 number = i + 1,
                 tank = t,
                 canRemove = tanks.size > 1,
+                showMinutes = tanks.size > 1,
                 onChange = { tanks[i] = it },
                 onRemove = { tanks.removeAt(i) },
             )
@@ -630,6 +748,7 @@ internal fun DiveForm(
                         startTime = startTime,
                         endTime = endTime,
                         tanks = tanks.map { it.toTank() },
+                        maxDepthMeters = maxDepth.toDec(),
                         avgDepthMeters = avgDepth.toDec(),
                         waterTempC = waterTemp.toDec(),
                         visibilityMeters = visibility.trim().toIntOrNull(),
@@ -642,9 +761,20 @@ internal fun DiveForm(
                         buddyPhone = buddyPhone,
                         buddyEmail = buddyEmail,
                         notes = notes.trim(),
+                        kind = kind,
+                        kindOther = if (kind == DiveKind.OTHER) kindOther.trim() else "",
+                        group = if (kind?.hasGroup == true) group.filter { it.name.isNotBlank() }.map { it.toPerson() } else emptyList(),
                     )
                 state.saveDive(dive)
-                if (shareAfter && buddyFromContacts) sharedDive = dive else onDone()
+                // Qui proposer de joindre : le binôme et/ou la palanquée, selon les cases cochées.
+                val toShare = (if (shareAfter) dive.shareRecipients.filter { it.name == dive.buddy } else emptyList()) +
+                    (if (shareGroupAfter) dive.group.filter { it.phone.isNotBlank() || it.email.isNotBlank() } else emptyList())
+                if (toShare.isNotEmpty()) {
+                    shareList = toShare
+                    sharedDive = dive
+                } else {
+                    onDone()
+                }
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(s.save) }
@@ -652,7 +782,7 @@ internal fun DiveForm(
 
     sharedDive?.let { d ->
         val diveSite = state.site(d.siteId)
-        if (diveSite == null) onDone() else ShareDiveDialog(d, diveSite, actions) { sharedDive = null; onDone() }
+        if (diveSite == null) onDone() else ShareDiveDialog(d, diveSite, actions, shareList) { sharedDive = null; onDone() }
     }
     if (creatingSite) {
         NewSiteDialog(
@@ -723,7 +853,14 @@ private fun NumField(
 }
 
 @Composable
-private fun TankEditor(number: Int, tank: TankForm, canRemove: Boolean, onChange: (TankForm) -> Unit, onRemove: () -> Unit) {
+private fun TankEditor(
+    number: Int,
+    tank: TankForm,
+    canRemove: Boolean,
+    showMinutes: Boolean,
+    onChange: (TankForm) -> Unit,
+    onRemove: () -> Unit,
+) {
     val s = LocalStrings.current
     val kind = when {
         (tank.he.trim().toIntOrNull() ?: 0) > 0 -> 2
@@ -741,7 +878,13 @@ private fun TankEditor(number: Int, tank: TankForm, canRemove: Boolean, onChange
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 NumField(s.volume, tank.volume, { onChange(tank.copy(volume = it)) }, Modifier.weight(1f), error = !tank.volumeOk, unit = "L")
-                NumField(s.depthLabel, tank.depth, { onChange(tank.copy(depth = it)) }, Modifier.weight(1f), error = !tank.depthOk, unit = "m")
+                NumField(s.avgDepthShort, tank.avgDepth, { onChange(tank.copy(avgDepth = it)) }, Modifier.weight(1f), error = !tank.avgDepthOk, unit = "m")
+            }
+            if (showMinutes) {
+                NumField(
+                    s.usedMinutesLabel, tank.minutes, { onChange(tank.copy(minutes = it.filter(Char::isDigit))) },
+                    Modifier.fillMaxWidth(), decimal = false, error = !tank.minutesOk, unit = "min",
+                )
             }
             Text(s.gas, style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -905,6 +1048,7 @@ private fun BuddyField(
     name: String,
     onName: (String) -> Unit,
     onPick: (name: String, phone: String, email: String, fromContacts: Boolean) -> Unit,
+    label: String? = null,
 ) {
     val s = LocalStrings.current
     var results by remember { mutableStateOf<List<PhoneContact>>(emptyList()) }
@@ -927,18 +1071,22 @@ private fun BuddyField(
     val active = q.isNotEmpty() && q != picked
     val fromContacts = if (active) results.filter { !it.name.equals(q, ignoreCase = true) } else emptyList()
     val contactKeys = fromContacts.map { it.name.lowercase() }.toSet()
+    // Personnes déjà saisies (binômes et palanquées), la plus récente d'abord, sans doublon de nom.
     val previous = if (!active) emptyList() else state.dives.sortedWith(diveOrder)
-        .filter { it.buddy.isNotBlank() }
-        .distinctBy { it.buddy.trim().lowercase() }
-        .filter { it.buddy.contains(q, ignoreCase = true) && !it.buddy.equals(q, ignoreCase = true) && it.buddy.trim().lowercase() !in contactKeys }
+        .flatMap { d ->
+            listOfNotNull(
+                d.buddy.takeIf { it.isNotBlank() }?.let { BuddySuggestion(it, d.buddyPhone, d.buddyEmail, d.buddyFromContacts) },
+            ) + d.group.filter { it.name.isNotBlank() }.map { BuddySuggestion(it.name, it.phone, it.email, it.fromContacts) }
+        }
+        .distinctBy { it.name.trim().lowercase() }
+        .filter { it.name.contains(q, ignoreCase = true) && !it.name.equals(q, ignoreCase = true) && it.name.trim().lowercase() !in contactKeys }
         .take(4)
-    val suggestions = previous.map { BuddySuggestion(it.buddy, it.buddyPhone, it.buddyEmail, it.buddyFromContacts) } +
-        fromContacts.map { BuddySuggestion(it.name, it.phone, it.email, true) }
+    val suggestions = previous + fromContacts.map { BuddySuggestion(it.name, it.phone, it.email, true) }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             name, { picked = null; onName(it) },
-            label = { Text(s.buddy) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text(label ?: s.buddy) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
         if (denied && q.isNotEmpty()) Text(s.contactsDenied, style = MaterialTheme.typography.bodySmall)
         if (suggestions.isNotEmpty()) {
@@ -973,30 +1121,42 @@ private fun BuddyField(
 
 // ----------------------------------------------------------------- Partage
 
-/** Propose d'envoyer la plongée au binôme (SMS, e-mail ou n'importe quelle appli) avec un lien d'ajout en un appui. */
+/**
+ * Propose d'envoyer la plongée aux personnes données (binôme, palanquée) par SMS, e-mail ou n'importe quelle appli,
+ * avec un lien pour l'ajouter à leur carnet en un appui.
+ */
 @Composable
-private fun ShareDiveDialog(dive: Dive, site: DiveSite, actions: PlatformActions, onDismiss: () -> Unit) {
+private fun ShareDiveDialog(
+    dive: Dive,
+    site: DiveSite,
+    actions: PlatformActions,
+    recipients: List<Person>,
+    onDismiss: () -> Unit,
+) {
     val s = LocalStrings.current
-    val message = s.shareMessage(site.fullName(), s.dateText(dive.date), DiveLink.encode(dive, site), APP_DOWNLOAD_URL)
-    val phone = dive.buddyPhone.filter { it.isDigit() || it == '+' }
+    val message = s.shareMessage(site.fullName(), s.dateText(dive.date), DiveLink.webLink(dive, site))
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(s.shareTitle) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(s.shareIntro(dive.buddy))
-                if (phone.isNotEmpty()) {
-                    Button(onClick = { actions.openLink("sms:$phone?body=${urlEncode(message)}") }, modifier = Modifier.fillMaxWidth()) {
-                        Text(s.shareBySms)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (recipients.size == 1) s.shareIntro(recipients[0].name) else s.shareIntroMany)
+                recipients.forEach { person ->
+                    val phone = person.phone.filter { it.isDigit() || it == '+' }
+                    if (recipients.size > 1) Text(person.name, style = MaterialTheme.typography.titleSmall)
+                    if (phone.isNotEmpty()) {
+                        Button(onClick = { actions.openLink("sms:$phone?body=${urlEncode(message)}") }, modifier = Modifier.fillMaxWidth()) {
+                            Text(s.shareBySms)
+                        }
                     }
-                }
-                if (dive.buddyEmail.isNotBlank()) {
-                    Button(
-                        onClick = {
-                            actions.openLink("mailto:${dive.buddyEmail.trim()}?subject=${urlEncode(s.shareSubject)}&body=${urlEncode(message)}")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(s.shareByEmail) }
+                    if (person.email.isNotBlank()) {
+                        Button(
+                            onClick = {
+                                actions.openLink("mailto:${person.email.trim()}?subject=${urlEncode(s.shareSubject)}&body=${urlEncode(message)}")
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(s.shareByEmail) }
+                    }
                 }
                 OutlinedButton(onClick = { actions.shareText(message) }, modifier = Modifier.fillMaxWidth()) {
                     Text(s.shareOther)

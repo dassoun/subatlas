@@ -107,6 +107,16 @@ interface Strings {
     val siteTypeLabel: String
     fun siteType(type: SiteType): String
     fun sortLabel(sort: DiveSort): String
+    val diveKindLabel: String
+    fun diveKind(kind: DiveKind): String
+    val kindOtherField: String
+    val groupSection: String
+    val personField: String
+    val addPerson: String
+    val shareGroupCheckbox: String
+    val shareWithPeople: String
+    val shareIntroMany: String
+    val usedMinutesLabel: String
     fun shareWithCheckbox(name: String): String
     val shareTitle: String
     fun shareIntro(name: String): String
@@ -116,7 +126,7 @@ interface Strings {
     val shareLater: String
     fun shareButton(name: String): String
     val shareSubject: String
-    fun shareMessage(site: String, date: String, link: String, download: String): String
+    fun shareMessage(site: String, date: String, link: String): String
     val contactsDenied: String
     val sharedTitle: String
     val sharedLead: String
@@ -159,6 +169,7 @@ interface Strings {
     val pressureEnd: String
     val depthLabel: String
     val avgDepthLabel: String
+    val avgDepthShort: String
     val avgDepthHint: String
     val sacLabel: String
     val conditionsSection: String
@@ -324,14 +335,30 @@ object FrStrings : Strings {
         SiteType.OTHER -> "Autre"
     }
     override fun sortLabel(sort: DiveSort) = when (sort) {
-        DiveSort.DATE_DESC -> "Date (récentes)"
-        DiveSort.DATE_ASC -> "Date (anciennes)"
+        DiveSort.DATE -> "Date"
         DiveSort.SITE -> "Site"
         DiveSort.COUNTRY -> "Pays"
-        DiveSort.DEPTH_DESC -> "Profondeur max"
-        DiveSort.DURATION_DESC -> "Durée"
-        DiveSort.SAC_ASC -> "SAC (croissant)"
+        DiveSort.DEPTH -> "Prof. max"
+        DiveSort.DURATION -> "Durée"
+        DiveSort.SAC -> "SAC"
     }
+    override val diveKindLabel = "Type de plongée"
+    override fun diveKind(kind: DiveKind) = when (kind) {
+        DiveKind.LEARNING -> "Apprentissage"
+        DiveKind.EXPLORATION -> "Exploration"
+        DiveKind.SUPERVISING -> "Encadrement"
+        DiveKind.TEACHING -> "Enseignement"
+        DiveKind.OTHER -> "Autre"
+    }
+    override val kindOtherField = "Précisez le type de plongée"
+    override val groupSection = "Palanquée"
+    override val personField = "Nom"
+    override val addPerson = "Ajouter une personne"
+    override val shareGroupCheckbox = "Proposer de partager cette plongée avec la palanquée"
+    override val shareWithPeople = "Partager avec…"
+    override val shareIntroMany =
+        "Envoyez la plongée à chacun : si l'application est installée, un appui suffit pour l'ajouter à son carnet ; sinon le message lui propose de la télécharger."
+    override val usedMinutesLabel = "Durée d'utilisation"
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
     override fun shareIntro(name: String) =
@@ -342,8 +369,8 @@ object FrStrings : Strings {
     override val shareLater = "Plus tard"
     override fun shareButton(name: String) = "Partager avec $name"
     override val shareSubject = "Plongée partagée"
-    override fun shareMessage(site: String, date: String, link: String, download: String) =
-        "Plongée du $date – $site.\nAjoute-la à ton carnet SubAtlas d'un appui : $link\nPas encore l'appli ? Télécharge-la : $download"
+    override fun shareMessage(site: String, date: String, link: String) =
+        "Plongée du $date – $site.\nOuvre ce lien pour l'ajouter à ton carnet SubAtlas (la page te propose de télécharger l'appli si besoin) : $link"
     override val contactsDenied = "Accès aux contacts refusé : seuls les binômes déjà saisis sont proposés."
     override val sharedTitle = "Plongée partagée"
     override val sharedLead = "On vous propose d'ajouter cette plongée à votre carnet :"
@@ -385,6 +412,7 @@ object FrStrings : Strings {
     override val pressureEnd = "Pression fin"
     override val depthLabel = "Profondeur max"
     override val avgDepthLabel = "Profondeur moyenne"
+    override val avgDepthShort = "Prof. moyenne"
     override val avgDepthHint = "Avec les pressions, le volume des bouteilles et la durée, elle permet de calculer votre SAC (consommation à la surface)."
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions et matériel"
@@ -567,14 +595,30 @@ object EnStrings : Strings {
         SiteType.OTHER -> "Other"
     }
     override fun sortLabel(sort: DiveSort) = when (sort) {
-        DiveSort.DATE_DESC -> "Date (newest)"
-        DiveSort.DATE_ASC -> "Date (oldest)"
+        DiveSort.DATE -> "Date"
         DiveSort.SITE -> "Site"
         DiveSort.COUNTRY -> "Country"
-        DiveSort.DEPTH_DESC -> "Max depth"
-        DiveSort.DURATION_DESC -> "Duration"
-        DiveSort.SAC_ASC -> "SAC (low to high)"
+        DiveSort.DEPTH -> "Max depth"
+        DiveSort.DURATION -> "Duration"
+        DiveSort.SAC -> "SAC"
     }
+    override val diveKindLabel = "Dive type"
+    override fun diveKind(kind: DiveKind) = when (kind) {
+        DiveKind.LEARNING -> "Training"
+        DiveKind.EXPLORATION -> "Exploration"
+        DiveKind.SUPERVISING -> "Supervising"
+        DiveKind.TEACHING -> "Teaching"
+        DiveKind.OTHER -> "Other"
+    }
+    override val kindOtherField = "Describe the dive type"
+    override val groupSection = "Group"
+    override val personField = "Name"
+    override val addPerson = "Add a person"
+    override val shareGroupCheckbox = "Offer to share this dive with the group"
+    override val shareWithPeople = "Share with…"
+    override val shareIntroMany =
+        "Send the dive to each person: if the app is installed, one tap adds it to their logbook; otherwise the message invites them to download it."
+    override val usedMinutesLabel = "Time on this tank"
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
     override fun shareIntro(name: String) =
@@ -585,8 +629,8 @@ object EnStrings : Strings {
     override val shareLater = "Later"
     override fun shareButton(name: String) = "Share with $name"
     override val shareSubject = "Shared dive"
-    override fun shareMessage(site: String, date: String, link: String, download: String) =
-        "Dive on $date – $site.\nAdd it to your SubAtlas logbook with one tap: $link\nDon't have the app yet? Download it: $download"
+    override fun shareMessage(site: String, date: String, link: String) =
+        "Dive on $date – $site.\nOpen this link to add it to your SubAtlas logbook (the page offers to download the app if you need it): $link"
     override val contactsDenied = "Contacts access denied: only buddies you already entered are suggested."
     override val sharedTitle = "Shared dive"
     override val sharedLead = "You are invited to add this dive to your logbook:"
@@ -628,6 +672,7 @@ object EnStrings : Strings {
     override val pressureEnd = "End pressure"
     override val depthLabel = "Max depth"
     override val avgDepthLabel = "Average depth"
+    override val avgDepthShort = "Avg depth"
     override val avgDepthHint = "Together with the pressures, the tank volumes and the duration, it lets the app compute your SAC (surface air consumption)."
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions and gear"

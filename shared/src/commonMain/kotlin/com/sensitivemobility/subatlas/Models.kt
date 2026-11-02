@@ -98,8 +98,24 @@ data class Tank(
     val hePercent: Int = 0,
     val pressureStartBar: Int? = null,
     val pressureEndBar: Int? = null,
+    /** Ancien champ (profondeur max saisie par bouteille) : remplacé par [Dive.maxDepthMeters], conservé à la lecture. */
     val maxDepthMeters: Double? = null,
+    /** Profondeur moyenne pendant l'utilisation de cette bouteille (sert au SAC par bouteille). */
+    val avgDepthMeters: Double? = null,
+    /** Durée d'utilisation de cette bouteille ; utile quand il y en a plusieurs. */
+    val usedMinutes: Int? = null,
 ) {
+    /**
+     * SAC de cette bouteille (L/min). Sans durée ni profondeur moyenne propres à la bouteille, on prend celles de la
+     * plongée (seulement s'il n'y a qu'une bouteille pour la durée).
+     */
+    fun sacLitersPerMin(fallbackMinutes: Int?, fallbackAvgDepth: Double?): Double? {
+        val used = consumedLiters?.takeIf { it > 0 } ?: return null
+        val minutes = (usedMinutes ?: fallbackMinutes)?.takeIf { it > 0 } ?: return null
+        val avg = avgDepthMeters ?: fallbackAvgDepth ?: return null
+        return used / (minutes * (1.0 + avg / 10.0))
+    }
+
     /** Gaz consommé en litres (détente à pression ambiante), si le volume et les deux pressions sont connus. */
     val consumedLiters: Double?
         get() {
@@ -119,6 +135,28 @@ enum class SuitType {
     val hasThickness: Boolean get() = this != DRY
 }
 
+@Serializable
+enum class DiveKind {
+    LEARNING,
+    EXPLORATION,
+    SUPERVISING,
+    TEACHING,
+    OTHER;
+
+    /** Encadrement et enseignement se font avec une palanquée. */
+    val hasGroup: Boolean get() = this == SUPERVISING || this == TEACHING
+}
+
+/** Une personne rencontrée en plongée : binôme ou membre d'une palanquée. */
+@Serializable
+data class Person(
+    val name: String,
+    /** Vient du répertoire : on a alors de quoi lui proposer la plongée. */
+    val fromContacts: Boolean = false,
+    val phone: String = "",
+    val email: String = "",
+)
+
 /** Une plongée réalisée sur un site. `date` : `yyyy-MM-dd` ; heures : `HH:mm`. */
 @Serializable
 data class Dive(
@@ -128,6 +166,8 @@ data class Dive(
     val startTime: String? = null,
     val endTime: String? = null,
     val tanks: List<Tank> = listOf(Tank()),
+    /** Profondeur max de la plongée. */
+    val maxDepthMeters: Double? = null,
     /** Profondeur moyenne de la plongée, avec les bouteilles et la durée : permet de calculer le SAC. */
     val avgDepthMeters: Double? = null,
     val waterTempC: Double? = null,
@@ -144,8 +184,21 @@ data class Dive(
     val buddyPhone: String = "",
     val buddyEmail: String = "",
     val notes: String = "",
+    val kind: DiveKind? = null,
+    /** Précision libre quand [kind] vaut [DiveKind.OTHER]. */
+    val kindOther: String = "",
+    /** Personnes encadrées ou enseignées (plongées d'encadrement et d'enseignement). */
+    val group: List<Person> = emptyList(),
 ) {
-    val maxDepthMeters: Double? get() = tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()
+    /** Profondeur max : celle de la plongée, sinon (anciennes données) la plus grande saisie par bouteille. */
+    val maxDepth: Double? get() = maxDepthMeters ?: tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()
+
+    /** Personnes à qui proposer la plongée : le binôme et la palanquée, quand on a de quoi les joindre. */
+    val shareRecipients: List<Person>
+        get() = listOfNotNull(
+            Person(buddy, buddyFromContacts, buddyPhone, buddyEmail)
+                .takeIf { buddy.isNotBlank() && (buddyPhone.isNotBlank() || buddyEmail.isNotBlank()) },
+        ) + group.filter { it.name.isNotBlank() && (it.phone.isNotBlank() || it.email.isNotBlank()) }
 
     /**
      * SAC (consommation à la surface, en L/min) = gaz consommé / (durée × pression absolue moyenne), avec une pression

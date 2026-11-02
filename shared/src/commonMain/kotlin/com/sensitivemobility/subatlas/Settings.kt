@@ -10,12 +10,19 @@ enum class AppLanguage { SYSTEM, FR, EN }
 
 /** Tri de la liste des plongées. */
 @Serializable
-enum class DiveSort { DATE_DESC, DATE_ASC, SITE, COUNTRY, DEPTH_DESC, DURATION_DESC, SAC_ASC }
+enum class DiveSort { DATE, SITE, COUNTRY, DEPTH, DURATION, SAC }
+
+/** Sens appliqué la première fois qu'on choisit ce critère ; un second appui inverse le tri. */
+internal fun DiveSort.defaultDescending(): Boolean = when (this) {
+    DiveSort.DATE, DiveSort.DEPTH, DiveSort.DURATION -> true
+    DiveSort.SITE, DiveSort.COUNTRY, DiveSort.SAC -> false
+}
 
 /** Préférences de l'utilisateur (enregistrées dans `settings.json`, hors des sauvegardes de données). */
 @Serializable
 data class Settings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val language: AppLanguage = AppLanguage.SYSTEM,
-    val diveSort: DiveSort = DiveSort.DATE_DESC,
+    val diveSort: DiveSort = DiveSort.DATE,
+    val diveSortDescending: Boolean = true,
 )

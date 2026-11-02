@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>SubAtlas</title>
+<style>
+  :root {
+    --abyss: #062a40; --ocean: #0b4f6c; --lagoon: #1b9aaa; --foam: #eaf7f8; --ink: #0a2533;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --foam: #04131d; --ink: #d8eef2; }
+    .card { background: #082230 !important; }
+    .btn.secondary { background: transparent !important; color: #7fd9e4 !important; border-color: #7fd9e4 !important; }
+    .box { background: #123a4d !important; color: #d8eef2 !important; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    background: var(--foam); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.45;
+  }
+  header { width: 100%; background: var(--abyss); color: #eaf7f8; padding: 18px 16px; text-align: center; font-size: 1.25rem; font-weight: 700; letter-spacing: .02em; }
+  main { width: 100%; max-width: 480px; padding: 20px 16px 40px; }
+  .card { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 2px 12px rgba(6, 42, 64, .12); }
+  h1 { font-size: 1.2rem; margin: 0 0 8px; }
+  .dive { margin: 12px 0 16px; padding: 12px 14px; border-radius: 12px; background: #d3eaed; color: var(--abyss); display: none; }
+  .dive b { display: block; font-size: 1.05rem; }
+  .btn {
+    display: block; width: 100%; margin-top: 12px; padding: 14px 16px; border-radius: 28px; text-align: center;
+    text-decoration: none; font-weight: 700; font-size: 1rem; background: var(--ocean); color: #fff;
+    border: 2px solid var(--ocean); cursor: pointer;
+  }
+  .btn.secondary { background: #fff; color: var(--ocean); }
+  .hint { font-size: .9rem; opacity: .85; margin-top: 16px; }
+  details { margin-top: 18px; font-size: .92rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  .box { margin-top: 10px; padding: 10px; border-radius: 10px; background: #eef4f5; word-break: break-all; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; max-height: 6.5em; overflow: auto; }
+  .msg { margin-top: 12px; font-size: .9rem; display: none; }
+</style>
+</head>
+<body>
+<header>🤿 SubAtlas</header>
+<main>
+  <div class="card">
+    <h1 id="title"></h1>
+    <p id="lead"></p>
+    <div class="dive" id="dive"></div>
+    <a class="btn" id="open" href="#"></a>
+    <a class="btn secondary" id="store" href="#"></a>
+    <p class="msg" id="msg"></p>
+    <p class="hint" id="hint"></p>
+    <details id="manual">
+      <summary id="manualTitle"></summary>
+      <p id="manualText"></p>
+      <div class="box" id="code"></div>
+      <a class="btn secondary" id="copy" href="#"></a>
+    </details>
+  </div>
+</main>
+<script>
+(function () {
+  // À renseigner une fois l'appli publiée (laisser vide pour masquer le bouton).
+  var PLAY_STORE = 'https://play.google.com/store/apps/details?id=com.sensitivemobility.subatlas';
+  var APP_STORE = '';
+  var PACKAGE = 'com.sensitivemobility.subatlas';
+
+  var fr = (navigator.language || 'en').toLowerCase().indexOf('fr') === 0;
+  var T = fr ? {
+    title: 'Une plongée partagée avec vous',
+    leadWith: 'Ouvrez-la dans SubAtlas pour l’ajouter à votre carnet en un appui.',
+    leadNone: 'SubAtlas est le carnet de plongée qui garde vos sites, vos plongées et vos check-lists.',
+    open: 'Ouvrir dans SubAtlas', store: 'Télécharger SubAtlas',
+    hint: 'Vous n’avez pas encore l’appli ? Installez-la puis revenez toucher ce lien : votre plongée vous attendra.',
+    manual: 'Ça ne s’ouvre pas ?',
+    manualText: 'Copiez ce code, ouvrez SubAtlas, onglet « Plongées », puis « Coller une plongée reçue ».',
+    copy: 'Copier le code', copied: 'Code copié.', notInstalled: 'Si rien ne s’est ouvert, l’appli n’est probablement pas installée.',
+    dive: function (d) { return 'Plongée du ' + d; }
+  } : {
+    title: 'A dive shared with you',
+    leadWith: 'Open it in SubAtlas to add it to your logbook with one tap.',
+    leadNone: 'SubAtlas is the dive logbook that keeps your sites, dives and checklists.',
+    open: 'Open in SubAtlas', store: 'Download SubAtlas',
+    hint: 'Don’t have the app yet? Install it, then come back and tap this link: your dive will be waiting.',
+    manual: 'Doesn’t open?',
+    manualText: 'Copy this code, open SubAtlas, go to the “Dives” tab, then “Paste a received dive”.',
+    copy: 'Copy the code', copied: 'Code copied.', notInstalled: 'If nothing opened, the app is probably not installed.',
+    dive: function (d) { return 'Dive on ' + d; }
+  };
+
+  var payload = (location.hash || '').replace(/^#/, '');
+  if (!/^[A-Za-z0-9_-]+$/.test(payload)) payload = '';
+
+  var ua = navigator.userAgent || '';
+  var isAndroid = /Android/i.test(ua);
+  var isIOS = /iPhone|iPad|iPod/i.test(ua);
+  var storeUrl = isIOS ? (APP_STORE || '') : (PLAY_STORE || '');
+
+  function $(id) { return document.getElementById(id); }
+  $('title').textContent = T.title;
+  $('lead').textContent = payload ? T.leadWith : T.leadNone;
+  $('open').textContent = T.open;
+  $('store').textContent = T.store;
+  $('hint').textContent = T.hint;
+  $('manualTitle').textContent = T.manual;
+  $('manualText').textContent = T.manualText;
+  $('copy').textContent = T.copy;
+
+  // Résumé lisible de la plongée, décodé depuis le lien (rien n'est envoyé à un serveur).
+  if (payload) {
+    try {
+      var b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var d = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+      var site = [d.site && d.site.country, d.site && d.site.name].filter(Boolean).join(' · ');
+      var when = d.date;
+      try { when = new Date(d.date + 'T12:00:00').toLocaleDateString(fr ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) {}
+      var extra = [];
+      if (d.start) extra.push(d.start + (d.end ? ' – ' + d.end : ''));
+      if (d.depth) extra.push((fr ? 'max ' : 'max ') + d.depth + ' m');
+      if (d.tempC) extra.push(d.tempC + ' °C');
+      var box = $('dive');
+      box.innerHTML = '';
+      var b = document.createElement('b'); b.textContent = site; box.appendChild(b);
+      box.appendChild(document.createTextNode(T.dive(when) + (extra.length ? ' — ' + extra.join(' · ') : '')));
+      box.style.display = 'block';
+    } catch (e) { /* lien illisible : on garde le bouton d'ouverture, l'appli dira si le lien est invalide */ }
+  }
+
+  var scheme = 'subatlas://dive?d=' + payload;
+  var open = $('open');
+  if (!payload) {
+    open.style.display = 'none';
+    $('manual').style.display = 'none';
+  } else if (isAndroid) {
+    // Android : ouvre l'appli si elle est installée, sinon renvoie vers le store.
+    var fallback = storeUrl ? ';S.browser_fallback_url=' + encodeURIComponent(storeUrl) : '';
+    open.href = 'intent://dive?d=' + payload + '#Intent;scheme=subatlas;package=' + PACKAGE + fallback + ';end';
+  } else {
+    open.href = scheme;
+    open.addEventListener('click', function () {
+      // iOS / autres : si la page est toujours là après un instant, l'appli n'est probablement pas installée.
+      setTimeout(function () {
+        if (!document.hidden) { var m = $('msg'); m.textContent = T.notInstalled; m.style.display = 'block'; }
+      }, 1600);
+    });
+  }
+
+  if (storeUrl) { $('store').href = storeUrl; } else { $('store').style.display = 'none'; $('hint').style.display = 'none'; }
+
+  $('code').textContent = scheme;
+  $('copy').addEventListener('click', function (ev) {
+    ev.preventDefault();
+    var done = function () { var m = $('msg'); m.textContent = T.copied; m.style.display = 'block'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(scheme).then(done, function () {});
+    else { var r = document.createRange(); r.selectNodeContents($('code')); var s = getSelection(); s.removeAllRanges(); s.addRange(r); try { document.execCommand('copy'); done(); } catch (e) {} }
+  });
+})();
+</script>
+</body>
+</html>

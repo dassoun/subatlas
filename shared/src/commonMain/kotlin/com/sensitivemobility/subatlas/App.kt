@@ -693,6 +693,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
     var addingItem by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var itemToDelete by remember { mutableStateOf<ChecklistItem?>(null) }
 
     val listState = rememberLazyListState()
     var draggingId by remember { mutableStateOf<Long?>(null) }
@@ -761,7 +762,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
                         }
                     }
                     TriStateBox(item.state) { state.cycleItem(list.id, item.id) }
-                    TextButton(onClick = { state.deleteItem(list.id, item.id) }) { Text("✕") }
+                    TextButton(onClick = { itemToDelete = item }) { Text("✕") }
                 }
                 HorizontalDivider()
             }
@@ -790,6 +791,13 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
             renaming = false
             state.renameChecklist(list.id, it)
         }
+    }
+    itemToDelete?.let { item ->
+        ConfirmDialog(
+            s.confirmDelete(item.text),
+            onConfirm = { state.deleteItem(list.id, item.id); itemToDelete = null },
+            onDismiss = { itemToDelete = null },
+        )
     }
     if (confirmDelete) {
         ConfirmDialog(

@@ -9,10 +9,12 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
 /**
- * Adresse de téléchargement de l'appli, ajoutée au message de partage pour qui ne l'a pas encore.
- * À remplacer par les vraies adresses (Google Play / App Store) une fois l'appli publiée.
+ * Page web (dossier `docs/`, publiée avec GitHub Pages) vers laquelle pointe le lien de partage. Un lien https est
+ * cliquable partout ; la page ouvre l'appli si elle est installée, sinon propose de la télécharger. La plongée voyage
+ * dans la partie après `#`, qui n'est jamais envoyée à un serveur.
+ * À adapter si le dépôt ou l'hébergement change (nom de domaine personnel, par exemple).
  */
-const val APP_DOWNLOAD_URL = "https://play.google.com/store/apps/details?id=com.sensitivemobility.subatlas"
+const val SHARE_PAGE_URL = "https://dassoun.github.io/subatlas/dive.html"
 
 /** Ce qui est partagé avec un binôme : le contexte commun de la plongée, pas ses bouteilles ni son équipement. */
 @Serializable
@@ -23,6 +25,7 @@ data class SharedDive(
     val start: String? = null,
     val end: String? = null,
     val depth: Double? = null,
+    val avg: Double? = null,
     val tempC: Double? = null,
     val visibility: Int? = null,
 )
@@ -38,22 +41,30 @@ data class SharedSite(
 
 object DiveLink {
     private const val PREFIX = "subatlas://dive?d="
-    private val pattern = Regex("subatlas://dive\\?d=([A-Za-z0-9_-]+)")
+    // Le lien peut être celui de l'appli (subatlas://dive?d=…) ou celui de la page web (…/dive.html#…).
+    private val pattern = Regex("(?:subatlas://dive\\?d=|dive\\.html#)([A-Za-z0-9_-]+)")
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; encodeDefaults = false }
 
+    /** Lien cliquable à envoyer : la page web, qui ouvre l'appli ou propose de la télécharger. */
+    fun webLink(dive: Dive, site: DiveSite): String = SHARE_PAGE_URL + "#" + payload(dive, site)
+
+    /** Lien direct vers l'appli (schéma `subatlas://`). */
+    fun encode(dive: Dive, site: DiveSite): String = PREFIX + payload(dive, site)
+
     @OptIn(ExperimentalEncodingApi::class)
-    fun encode(dive: Dive, site: DiveSite): String {
+    private fun payload(dive: Dive, site: DiveSite): String {
         val shared = SharedDive(
             site = SharedSite(site.name, site.country, site.latitude, site.longitude, site.type),
             date = dive.date,
             start = dive.startTime,
             end = dive.endTime,
-            depth = dive.maxDepthMeters,
+            depth = dive.maxDepth,
+            avg = dive.avgDepthMeters,
             tempC = dive.waterTempC,
             visibility = dive.visibilityMeters,
         )
         val bytes = json.encodeToString(SharedDive.serializer(), shared).encodeToByteArray()
-        return PREFIX + Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT).encode(bytes)
+        return Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT).encode(bytes)
     }
 
     /** Retrouve un lien de plongée dans un texte quelconque (lien seul ou message collé en entier). */

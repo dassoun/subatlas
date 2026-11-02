@@ -19,7 +19,8 @@ internal val diveOrder: Comparator<Dive> =
     compareByDescending<Dive> { it.date }.thenByDescending { it.startTime.orEmpty() }.thenByDescending { it.id }
 
 class AppState(private val storage: Storage, private val systemLanguage: String) {
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    // coerceInputValues : une valeur d'énumération devenue inconnue retombe sur la valeur par défaut (anciens réglages).
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true }
     private val siteSerializer = ListSerializer(DiveSite.serializer())
     private val checklistSerializer = ListSerializer(Checklist.serializer())
     private val centerSerializer = ListSerializer(DiveCenter.serializer())
@@ -142,7 +143,9 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
             date = shared.date,
             startTime = shared.start,
             endTime = shared.end,
-            tanks = listOf(Tank(maxDepthMeters = shared.depth)),
+            tanks = listOf(Tank()),
+            maxDepthMeters = shared.depth,
+            avgDepthMeters = shared.avg,
             waterTempC = shared.tempC,
             visibilityMeters = shared.visibility,
         )
