@@ -82,6 +82,9 @@ class IosPlatformActions : PlatformActions {
         UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(sheet, animated = true, completion = null)
     }
 
+    override suspend fun openFileBytes(): ByteArray? =
+        throw UnsupportedOperationException("pas encore disponible sur iOS")
+
     override fun openMap(latitude: Double, longitude: Double, label: String) {
         val url = NSURL.URLWithString("http://maps.apple.com/?ll=$latitude,$longitude&q=${label.replace(" ", "%20")}")
             ?: return

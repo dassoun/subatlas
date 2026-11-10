@@ -117,6 +117,20 @@ interface Strings {
     val shareWithPeople: String
     val shareIntroMany: String
     val usedMinutesLabel: String
+    val importShearwater: String
+    val shearwaterTitle: String
+    fun shearwaterFound(total: Int, created: Int, merged: Int): String
+    val shearwaterNone: String
+    val shearwaterInvalid: String
+    val shearwaterConfirm: String
+    fun shearwaterDone(created: Int, merged: Int): String
+    val shearwaterNewTag: String
+    val shearwaterMergeTag: String
+    val shearwaterMergeHelp: String
+    val computerLabel: String
+    val profileTitle: String
+    val profileDepthLegend: String
+    val profilePressureLegend: String
     fun shareWithCheckbox(name: String): String
     val shareTitle: String
     fun shareIntro(name: String): String
@@ -359,6 +373,23 @@ object FrStrings : Strings {
     override val shareIntroMany =
         "Envoyez la plongée à chacun : si l'application est installée, un appui suffit pour l'ajouter à son carnet ; sinon le message lui propose de la télécharger."
     override val usedMinutesLabel = "Durée d'utilisation"
+    override val importShearwater = "Importer depuis Shearwater"
+    override val shearwaterTitle = "Import Shearwater"
+    override fun shearwaterFound(total: Int, created: Int, merged: Int) =
+        "$total plongée${if (total > 1) "s" else ""} dans ce fichier : $created nouvelle${if (created > 1) "s" else ""}, $merged à fusionner avec une plongée du carnet."
+    override val shearwaterNone = "Aucune plongée trouvée dans ce fichier."
+    override val shearwaterInvalid = "Ce fichier n'est pas un export Shearwater Cloud lisible."
+    override val shearwaterConfirm = "Importer"
+    override fun shearwaterDone(created: Int, merged: Int) =
+        "$created plongée${if (created > 1) "s" else ""} ajoutée${if (created > 1) "s" else ""}, $merged fusionnée${if (merged > 1) "s" else ""}."
+    override val shearwaterNewTag = "nouvelle"
+    override val shearwaterMergeTag = "fusion"
+    override val shearwaterMergeHelp =
+        "Une plongée du carnet à la même date et à moins d'une heure est complétée avec les données de l'ordinateur et reçoit la courbe ; rien de ce que vous avez saisi n'est écrasé."
+    override val computerLabel = "Ordinateur"
+    override val profileTitle = "Profil de plongée"
+    override val profileDepthLegend = "Profondeur (m)"
+    override val profilePressureLegend = "Pression (bar)"
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
     override fun shareIntro(name: String) =
@@ -619,6 +650,22 @@ object EnStrings : Strings {
     override val shareIntroMany =
         "Send the dive to each person: if the app is installed, one tap adds it to their logbook; otherwise the message invites them to download it."
     override val usedMinutesLabel = "Time on this tank"
+    override val importShearwater = "Import from Shearwater"
+    override val shearwaterTitle = "Shearwater import"
+    override fun shearwaterFound(total: Int, created: Int, merged: Int) =
+        "$total dive${if (total != 1) "s" else ""} in this file: $created new, $merged to merge with a logbook dive."
+    override val shearwaterNone = "No dive found in this file."
+    override val shearwaterInvalid = "This file is not a readable Shearwater Cloud export."
+    override val shearwaterConfirm = "Import"
+    override fun shearwaterDone(created: Int, merged: Int) = "$created dive${if (created != 1) "s" else ""} added, $merged merged."
+    override val shearwaterNewTag = "new"
+    override val shearwaterMergeTag = "merge"
+    override val shearwaterMergeHelp =
+        "A logbook dive on the same date and within one hour is completed with the computer's data and gets the profile; nothing you typed is overwritten."
+    override val computerLabel = "Dive computer"
+    override val profileTitle = "Dive profile"
+    override val profileDepthLegend = "Depth (m)"
+    override val profilePressureLegend = "Pressure (bar)"
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
     override fun shareIntro(name: String) =

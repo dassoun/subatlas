@@ -135,9 +135,28 @@ internal fun DiveList(
     onOpen: (Long) -> Unit,
     onAdd: () -> Unit,
     onShared: (SharedDive) -> Unit,
+    actions: PlatformActions,
 ) {
     val s = LocalStrings.current
     var pasting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    // Import d'un export Shearwater Cloud : on lit le fichier, on prépare la fusion, puis l'utilisateur confirme.
+    fun startShearwaterImport() {
+        scope.launch {
+            try {
+                val bytes = actions.openFileBytes() ?: return@launch
+                val found = ShearwaterImport.parse(bytes)
+                if (found.isEmpty()) message = s.shearwaterNone else plan = state.planShearwaterImport(found)
+            } catch (e: ShearwaterImport.NotShearwaterException) {
+                message = s.shearwaterInvalid
+            } catch (e: Exception) {
+                message = s.importFailed(e.message ?: s.unknownError)
+            }
+        }
+    }
     val sort = state.settings.diveSort
     val descending = state.settings.diveSortDescending
     Column(Modifier.fillMaxSize().padding(pad)) {
@@ -189,9 +208,66 @@ internal fun DiveList(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text(s.addDive) }
             TextButton(onClick = { pasting = true }, modifier = Modifier.fillMaxWidth()) { Text(s.pasteSharedButton) }
+            TextButton(onClick = { startShearwaterImport() }, modifier = Modifier.fillMaxWidth()) { Text(s.importShearwater) }
         }
     }
     if (pasting) PasteSharedDialog(onDismiss = { pasting = false }) { pasting = false; onShared(it) }
+    plan?.let { items ->
+        ShearwaterPlanDialog(
+            items,
+            onConfirm = {
+                val (created, merged) = state.applyShearwaterImport(items)
+                plan = null
+                message = s.shearwaterDone(created, merged)
+            },
+            onDismiss = { plan = null },
+        )
+    }
+    message?.let { text ->
+        AlertDialog(
+            onDismissRequest = { message = null },
+            text = { Text(text) },
+            confirmButton = { TextButton(onClick = { message = null }) { Text(s.ok) } },
+        )
+    }
+}
+
+/** Aperçu de l'import : ce qui sera ajouté et ce qui sera fusionné avec une plongée du carnet. */
+@Composable
+private fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val s = LocalStrings.current
+    val merged = items.count { it.mergeInto != null }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(s.shearwaterTitle) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(s.shearwaterFound(items.size, items.size - merged, merged))
+                items.forEach { item ->
+                    val sw = item.dive
+                    Column {
+                        Text(
+                            listOf(s.dateText(sw.date), sw.startTime.orEmpty(), "·", sw.siteName).filter { it.isNotEmpty() }.joinToString(" "),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        val details = listOfNotNull(
+                            sw.maxDepth?.let { "max\u00A0${formatNum(it)}\u00A0m" },
+                            sw.durationSeconds?.let { s.minutesShort(it / 60) },
+                            if (item.mergeInto != null) s.shearwaterMergeTag else s.shearwaterNewTag,
+                        )
+                        Text(
+                            details.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (item.mergeInto != null) StatusWarn else StatusOk,
+                        )
+                    }
+                }
+                if (merged > 0) Text(s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { Button(onClick = onConfirm) { Text(s.shearwaterConfirm) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
+    )
 }
 
 /**
@@ -304,6 +380,7 @@ internal fun DiveDetailView(
         dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
         dive.maxDepth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
         dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
+        dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth()) }
 
         dive.tanks.forEachIndexed { i, tank ->
             Card(
@@ -345,6 +422,7 @@ internal fun DiveDetailView(
         if (suitText.isNotEmpty()) Text(s.labelled(s.suit, suitText))
         if (dive.buddy.isNotBlank()) Text(s.labelled(s.buddy, dive.buddy))
         if (dive.group.isNotEmpty()) Text(s.labelled(s.groupSection, dive.group.joinToString(", ") { it.name }))
+        if (dive.computer.isNotBlank()) Text(s.labelled(s.computerLabel, dive.computer))
         if (dive.notes.isNotBlank()) Text(s.notesLine(dive.notes))
 
         val lat = site?.latitude

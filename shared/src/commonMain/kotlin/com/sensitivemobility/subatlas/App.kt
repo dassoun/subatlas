@@ -220,6 +220,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             onOpen = { push(Screen.DiveDetail(it)) },
                             onAdd = { push(Screen.DiveForm(null, null)) },
                             onShared = { sharedIncoming = it },
+                            actions = actions,
                         )
                     Screen.Sites ->
                         SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) })

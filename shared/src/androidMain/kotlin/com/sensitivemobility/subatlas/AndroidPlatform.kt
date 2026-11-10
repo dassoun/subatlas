@@ -69,6 +69,14 @@ class AndroidPlatformActions(
         runCatching { context.startActivity(chooser) }
     }
 
+    override suspend fun openFileBytes(): ByteArray? {
+        val uri = pickOpenUri() ?: return null
+        return withContext(Dispatchers.IO) {
+            val input = context.contentResolver.openInputStream(uri) ?: error("impossible de lire le fichier")
+            input.use { it.readBytes() }
+        }
+    }
+
     override fun openMap(latitude: Double, longitude: Double, label: String) {
         val uri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude(${Uri.encode(label)})")
         val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

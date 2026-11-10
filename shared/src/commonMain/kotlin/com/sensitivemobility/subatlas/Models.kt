@@ -157,6 +157,20 @@ data class Person(
     val email: String = "",
 )
 
+/** Courbe d'une plongée lue sur un ordinateur de plongée : un point par échantillon, à intervalle régulier. */
+@Serializable
+data class DiveProfile(
+    val intervalSeconds: Int,
+    /** Profondeur en décimètres (1/10 m). */
+    val depthDm: List<Int>,
+    /** Température de l'eau en dixièmes de degré Celsius ; vide si inconnue. */
+    val tempDc: List<Int> = emptyList(),
+    /** Pression de la bouteille 1 en bar ; vide s'il n'y avait pas de capteur. */
+    val pressureBar: List<Int> = emptyList(),
+) {
+    val durationSeconds: Int get() = (depthDm.size - 1).coerceAtLeast(0) * intervalSeconds
+}
+
 /** Une plongée réalisée sur un site. `date` : `yyyy-MM-dd` ; heures : `HH:mm`. */
 @Serializable
 data class Dive(
@@ -189,6 +203,12 @@ data class Dive(
     val kindOther: String = "",
     /** Personnes encadrées ou enseignées (plongées d'encadrement et d'enseignement). */
     val group: List<Person> = emptyList(),
+    /** Ordinateur de plongée dont viennent les données (modèle et numéro de série), si la plongée a été importée. */
+    val computer: String = "",
+    /** Identifiant de la plongée dans la source importée : évite les doublons si on réimporte le même fichier. */
+    val importKey: String = "",
+    /** Courbe de la plongée (profondeur, température, pression), si elle a été importée. */
+    val profile: DiveProfile? = null,
 ) {
     /** Profondeur max : celle de la plongée, sinon (anciennes données) la plus grande saisie par bouteille. */
     val maxDepth: Double? get() = maxDepthMeters ?: tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()
@@ -220,6 +240,13 @@ data class Dive(
             val b = minutesOfDay(endTime) ?: return null
             return if (b >= a) b - a else b + 24 * 60 - a
         }
+}
+
+/** Heure `HH:mm` + une durée en secondes (au-delà de minuit, on repart de 00:00). */
+internal fun timePlusSeconds(time: String?, seconds: Int): String? {
+    val start = minutesOfDay(time) ?: return null
+    val minutes = (start + seconds / 60) % (24 * 60)
+    return "${(minutes / 60).toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}"
 }
 
 internal fun minutesOfDay(time: String?): Int? {

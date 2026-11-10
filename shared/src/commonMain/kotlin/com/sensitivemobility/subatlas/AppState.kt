@@ -18,6 +18,9 @@ private const val SETTINGS_FILE = "settings.json"
 internal val diveOrder: Comparator<Dive> =
     compareByDescending<Dive> { it.date }.thenByDescending { it.startTime.orEmpty() }.thenByDescending { it.id }
 
+/** Une plongée d'un export Shearwater et la plongée du carnet avec laquelle elle sera fusionnée (`null` : nouvelle). */
+internal class ShearwaterPlanItem(val dive: ShearwaterDive, val mergeInto: Dive?)
+
 class AppState(private val storage: Storage, private val systemLanguage: String) {
     // coerceInputValues : une valeur d'énumération devenue inconnue retombe sur la valeur par défaut (anciens réglages).
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true }
@@ -119,6 +122,126 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         sites.removeAll { it.id == id }
         saveSites()
         if (dives.removeAll { it.siteId == id }) saveDives()
+    }
+
+    // --- Import Shearwater ---
+    /** Fenêtre de tolérance (en minutes) entre l'heure saisie dans le carnet et celle de l'ordinateur de plongée. */
+    private val mergeWindowMinutes = 60
+
+    /**
+     * Pour chaque plongée du fichier, la plongée du carnet avec laquelle la fusionner : celle déjà importée de la même
+     * source, sinon celle du même jour dont l'heure de début est la plus proche (à moins d'une heure), sinon la seule
+     * plongée du jour sans heure sur le même site. `null` : nouvelle plongée.
+     */
+    internal fun planShearwaterImport(list: List<ShearwaterDive>): List<ShearwaterPlanItem> {
+        val taken = HashSet<Long>()
+        return list.map { sw ->
+            val match = dives.firstOrNull { it.importKey == sw.key && it.id !in taken } ?: closestByTime(sw, taken)
+            if (match != null) taken += match.id
+            ShearwaterPlanItem(sw, match)
+        }
+    }
+
+    private fun closestByTime(sw: ShearwaterDive, taken: Set<Long>): Dive? {
+        val swStart = minutesOfDay(sw.startTime)
+        val sameDay = dives.filter { it.date == sw.date && it.id !in taken && it.importKey.isEmpty() }
+        if (swStart != null) {
+            val timed = sameDay
+                .mapNotNull { d -> minutesOfDay(d.startTime)?.let { d to kotlin.math.abs(it - swStart) } }
+                .filter { it.second <= mergeWindowMinutes }
+                .minByOrNull { it.second }
+            if (timed != null) return timed.first
+        }
+        return sameDay
+            .filter { it.startTime == null && site(it.siteId)?.name.equals(sw.siteName, ignoreCase = true) }
+            .singleOrNull()
+    }
+
+    /** Applique l'import : renvoie (plongées créées, plongées fusionnées). */
+    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>): Pair<Int, Int> {
+        var created = 0
+        var merged = 0
+        for (item in plan) {
+            val existing = item.mergeInto
+            if (existing != null) {
+                saveDive(mergeShearwater(existing, item.dive))
+                merged++
+            } else {
+                saveDive(newDiveFrom(item.dive))
+                created++
+            }
+        }
+        return created to merged
+    }
+
+    private fun siteFor(sw: ShearwaterDive): DiveSite {
+        val name = sw.siteName.ifBlank { sw.siteNotes.ifBlank { sw.country.ifBlank { "Shearwater" } } }
+        val found = sites.firstOrNull {
+            it.name.equals(name, ignoreCase = true) &&
+                (it.country.isBlank() || sw.country.isBlank() || it.country.equals(sw.country, ignoreCase = true))
+        }
+        if (found != null) return found
+        return DiveSite(
+            id = newId(), name = name, country = sw.country, latitude = sw.latitude, longitude = sw.longitude,
+            notes = if (sw.siteName.isNotBlank()) sw.siteNotes else "",
+        ).also { saveSite(it) }
+    }
+
+    private fun newDiveFrom(sw: ShearwaterDive): Dive = Dive(
+        id = newId(),
+        siteId = siteFor(sw).id,
+        date = sw.date,
+        startTime = sw.startTime,
+        endTime = sw.endTime,
+        tanks = sw.tanks.ifEmpty { listOf(Tank()) },
+        maxDepthMeters = sw.maxDepth,
+        avgDepthMeters = sw.avgDepth,
+        waterTempC = sw.waterTempC,
+        visibilityMeters = sw.visibilityMeters,
+        weightKg = sw.weightKg,
+        suitType = sw.suitType,
+        buddy = sw.buddy,
+        notes = sw.notes,
+        computer = sw.computer,
+        importKey = sw.key,
+        profile = sw.profile,
+    )
+
+    /** Complète la plongée du carnet avec les données de l'ordinateur, sans écraser ce que l'utilisateur a saisi. */
+    private fun mergeShearwater(d: Dive, sw: ShearwaterDive): Dive {
+        val tanks = d.tanks.toMutableList()
+        sw.tanks.forEachIndexed { i, t ->
+            if (i < tanks.size) {
+                val cur = tanks[i]
+                val defaultGas = cur.o2Percent == 21 && cur.hePercent == 0
+                tanks[i] = cur.copy(
+                    volumeLiters = cur.volumeLiters ?: t.volumeLiters,
+                    pressureStartBar = cur.pressureStartBar ?: t.pressureStartBar,
+                    pressureEndBar = cur.pressureEndBar ?: t.pressureEndBar,
+                    o2Percent = if (defaultGas) t.o2Percent else cur.o2Percent,
+                    hePercent = if (defaultGas) t.hePercent else cur.hePercent,
+                )
+            } else {
+                tanks += t
+            }
+        }
+        return d.copy(
+            startTime = d.startTime ?: sw.startTime,
+            // La fin se déduit de la durée mesurée par l'ordinateur, à partir de l'heure de début du carnet si elle existe.
+            endTime = d.endTime ?: sw.durationSeconds?.let { timePlusSeconds(d.startTime ?: sw.startTime, it) } ?: sw.endTime,
+            tanks = tanks,
+            maxDepthMeters = d.maxDepthMeters ?: if (d.maxDepth == null) sw.maxDepth else null,
+            avgDepthMeters = d.avgDepthMeters ?: sw.avgDepth,
+            waterTempC = d.waterTempC ?: sw.waterTempC,
+            visibilityMeters = d.visibilityMeters ?: sw.visibilityMeters,
+            weightKg = d.weightKg ?: sw.weightKg,
+            suitType = if (d.suitType == null && d.suit.isBlank()) sw.suitType else d.suitType,
+            buddy = d.buddy.ifBlank { sw.buddy },
+            notes = d.notes.ifBlank { sw.notes },
+            computer = sw.computer,
+            importKey = sw.key,
+            profile = sw.profile ?: d.profile,
+        )
     }
 
     // --- Plongées partagées ---

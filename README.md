@@ -41,3 +41,19 @@ deployment → Deploy from a branch → `main` / `/docs`*. La page est alors ser
 fois les fiches des stores créées. Pour ouvrir l'appli directement depuis un lien https (sans passer par le bouton de la
 page), il faudra un nom de domaine à soi (Android App Links et iOS Universal Links exigent un fichier de vérification à la
 racine du domaine, ce que `github.io` ne permet pas pour un dépôt de projet).
+
+## Import depuis Shearwater Cloud
+L'écran « Plongées » propose « Importer depuis Shearwater » : on choisit un export Shearwater Cloud (fichier `.db`, SQLite).
+SubAtlas le lit lui-même (lecteur SQLite et décompression gzip en Kotlin pur dans `SqliteReader.kt` et `Inflate.kt`, donc
+identiques sur Android et iOS) :
+- `dive_details` : date et heure, site, pays, profondeur max et moyenne, durée, température, lestage, combinaison, notes,
+  bouteilles (pressions de début et de fin converties de PSI en bar, volume, mélange) ;
+- `log_data` : le profil, au format binaire Shearwater « PNF » (enregistrements de 32 octets) : profondeur, température et
+  pression de la bouteille 1 toutes les 5 s environ.
+
+Une plongée du carnet à la même date et à moins d'une heure (ou déjà importée de la même source) est complétée sans rien
+écraser de ce qui a été saisi ; sinon une nouvelle plongée est créée, avec son site. Un aperçu demande confirmation.
+La courbe s'affiche dans la fiche de la plongée (un appui ou un glissement donne les valeurs au point touché).
+
+Limites connues : la sélection du fichier n'est pas encore implémentée sur iOS (comme l'export des données) ; seul le
+capteur de la bouteille 1 alimente la courbe de pression ; les exports en unités impériales n'ont pas été testés.

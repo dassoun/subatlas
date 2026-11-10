@@ -48,4 +48,7 @@ interface PlatformActions {
 
     /** Fait choisir un fichier texte à l'utilisateur et renvoie son contenu ; `null` s'il annule. */
     suspend fun openTextFile(): String?
+
+    /** Fait choisir un fichier quelconque à l'utilisateur et renvoie ses octets ; `null` s'il annule. */
+    suspend fun openFileBytes(): ByteArray?
 }
