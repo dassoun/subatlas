@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +71,7 @@ internal fun ProfileChart(
     modifier: Modifier = Modifier,
     fullscreen: Boolean = false,
     onFullscreen: (() -> Unit)? = null,
+    onOpenProcedure: (() -> Unit)? = null,
 ) {
     val s = LocalStrings.current
     val measurer = rememberTextMeasurer()
@@ -286,7 +288,7 @@ internal fun ProfileChart(
             // Remontée trop rapide : le tronçon de courbe prend la couleur de la gravité (orange, puis rouge).
             for (i in 1 until n) {
                 val color = scale.colorFor(rates[i]) ?: continue
-                drawLine(color, Offset(x(i - 1), yDepth(profile.depthDm[i - 1])), Offset(x(i), yDepth(profile.depthDm[i])), 4f * density, StrokeCap.Round)
+                drawLine(color, Offset(x(i - 1), yDepth(profile.depthDm[i - 1])), Offset(x(i), yDepth(profile.depthDm[i])), 2.5f * density, StrokeCap.Round)
             }
 
             // Point sélectionné.
@@ -324,6 +326,10 @@ internal fun ProfileChart(
                 color = color,
                 modifier = Modifier.padding(start = 4.dp),
             )
+        }
+        // Au-delà de la définition fédérale d'une remontée rapide : accès direct à la procédure.
+        if (onOpenProcedure != null && maxRate > FAST_ASCENT_FFESSM_RATE) {
+            TextButton(onClick = onOpenProcedure) { Text(s.safetySeeProcedure) }
         }
     }
 }
@@ -402,7 +408,7 @@ internal fun ProfileSparkline(profile: DiveProfile, modifier: Modifier = Modifie
         for (k in 1 until indices.size) {
             val i = indices[k]
             val color = scale.colorFor(rates[i]) ?: continue
-            drawLine(color, Offset(x(indices[k - 1]), y(indices[k - 1])), Offset(x(i), y(i)), stroke * 2f, StrokeCap.Round)
+            drawLine(color, Offset(x(indices[k - 1]), y(indices[k - 1])), Offset(x(i), y(i)), stroke, StrokeCap.Round)
         }
     }
 }

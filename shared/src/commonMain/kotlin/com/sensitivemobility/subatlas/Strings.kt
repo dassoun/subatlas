@@ -229,6 +229,17 @@ interface Strings {
     fun ascentLevel(i: Int): String
     fun ascentLimit(v: Int): String
     val ascentReset: String
+    val tabSafety: String
+    val safetyTitle: String
+    val emergencyTitle: String
+    val emergencyEurope: String
+    val emergencySamu: String
+    val emergencySea: String
+    val safetyDisclaimer: String
+    val safetySourceNote: String
+    val safetyOpenSource: String
+    val safetySeeProcedure: String
+    val safetyCards: List<SafetyCard>
     val languageSystem: String
     val dataSection: String
     val dataHint: String
@@ -515,6 +526,83 @@ object FrStrings : Strings {
     override fun ascentLevel(i: Int) = "Seuil $i"
     override fun ascentLimit(v: Int) = "au-delà de $v m/min"
     override val ascentReset = "Valeurs par défaut"
+    override val tabSafety = "Sécurité"
+    override val safetyTitle = "Procédures de sécurité"
+    override val emergencyTitle = "Urgence : appeler"
+    override val emergencyEurope = "112 · Numéro d'urgence européen"
+    override val emergencySamu = "15 · SAMU"
+    override val emergencySea = "196 · CROSS (urgence en mer)"
+    override val safetyDisclaimer = "Aide-mémoire fondé sur les préconisations fédérales pour la plongée à l'air avec ordinateur. Il ne remplace ni la formation, ni les consignes du directeur de plongée, ni les secours."
+    override val safetySourceNote = "Source : FFESSM, fiche guide technique « Préconisations fédérales en cas de remontées anormales en plongée avec ordinateur » (validation CDN du 13 octobre 2024)."
+    override val safetyOpenSource = "Ouvrir le document officiel"
+    override val safetySeeProcedure = "Voir la procédure de remontée rapide"
+    override val safetyCards = listOf(
+        SafetyCard(
+            id = SAFETY_FAST_ASCENT,
+            title = "Remontée rapide",
+            summary = "Plus de 15 m/min entre 30 m et la surface : se réimmerger dans les 3 minutes.",
+            sections = listOf(
+                SafetySection("Définition", listOf("Remontée à plus de 15 m/min, entre 30 m et la surface, sur une distance d'au moins 10 m.")),
+                SafetySection(
+                    "Conduite à tenir",
+                    listOf(
+                        "Se réimmerger dans un délai maximum de 3 minutes, au minimum à mi-profondeur de la plongée.",
+                        "Y rester 5 minutes.",
+                        "Remonter, en ajoutant aux éventuels paliers indiqués par l'ordinateur ou la table : 1 minute à 6 m, puis 5 minutes à 3 m.",
+                    ),
+                    numbered = true,
+                ),
+                SafetySection(
+                    "Si la réimmersion est impossible",
+                    listOf("Mise sous oxygène et évacuation vers un centre hyperbare."),
+                ),
+                SafetySection(
+                    "Exemples (plongée à 30 m)",
+                    listOf(
+                        "Sans palier affiché : redescendre à 15 m minimum pendant 5 min, puis 1 min à 6 m et 5 min à 3 m.",
+                        "Avec 3 min à 3 m affichées : redescendre à 15 m minimum pendant 5 min, puis 1 min à 6 m et 8 min à 3 m.",
+                    ),
+                ),
+            ),
+        ),
+        SafetyCard(
+            id = "deco-interrupted",
+            title = "Palier obligatoire interrompu",
+            summary = "Se réimmerger dans les 3 minutes et ajouter 3 minutes au palier de 3 m.",
+            sections = listOf(
+                SafetySection(
+                    "Conduite à tenir",
+                    listOf(
+                        "Se réimmerger dans les 3 minutes.",
+                        "Suivre les indications du moyen de décompression utilisé, en ajoutant 3 minutes au palier de 3 m.",
+                    ),
+                    numbered = true,
+                ),
+                SafetySection(
+                    "Si la réimmersion est impossible",
+                    listOf(
+                        "Signe d'un possible accident, OU plus de 3 minutes de paliers non réalisés : mise sous oxygène et déclenchement des secours.",
+                        "Pas de signe d'un possible accident, ET moins de 3 minutes de paliers non réalisés : période d'observation de 3 heures et interdiction de replonger pendant 24 heures. Au moindre signe pouvant évoquer un accident : déclenchement des secours.",
+                    ),
+                ),
+            ),
+        ),
+        SafetyCard(
+            id = "yoyo",
+            title = "Remontées multiples (yoyos)",
+            summary = "Si possible, ne pas dépasser le seuil de 6 m ; limites recommandées par la CTN.",
+            sections = listOf(
+                SafetySection(
+                    "Conduite à tenir",
+                    listOf("En cas de remontées multiples, elles ne doivent pas, si possible, dépasser le seuil de 6 m."),
+                ),
+                SafetySection(
+                    "Maximum recommandé par la CTN",
+                    listOf("4 remontées de 20 m", "3 remontées de 25 m ou de 30 m", "2 remontées de 40 m"),
+                ),
+            ),
+        ),
+    )
     override val languageSystem = "Système"
     override val dataSection = "Données"
     override val dataHint = "Enregistrez vos plongées, sites et check-lists dans un fichier, ou restaurez-les depuis une sauvegarde."
@@ -813,6 +901,83 @@ object EnStrings : Strings {
     override fun ascentLevel(i: Int) = "Threshold $i"
     override fun ascentLimit(v: Int) = "above $v m/min"
     override val ascentReset = "Reset to defaults"
+    override val tabSafety = "Safety"
+    override val safetyTitle = "Safety procedures"
+    override val emergencyTitle = "Emergency: call"
+    override val emergencyEurope = "112 · European emergency number"
+    override val emergencySamu = "15 · SAMU (medical emergency, France)"
+    override val emergencySea = "196 · CROSS (emergency at sea, France)"
+    override val safetyDisclaimer = "Memo based on the French federation's recommendations for air diving with a dive computer. It replaces neither training, nor the dive director's instructions, nor the emergency services."
+    override val safetySourceNote = "Source: FFESSM, technical guide sheet \"Federal recommendations for abnormal ascents when diving with a computer\" (validated by the CDN on 13 October 2024). In French."
+    override val safetyOpenSource = "Open the official document"
+    override val safetySeeProcedure = "See the fast ascent procedure"
+    override val safetyCards = listOf(
+        SafetyCard(
+            id = SAFETY_FAST_ASCENT,
+            title = "Fast ascent",
+            summary = "Over 15 m/min between 30 m and the surface: go back down within 3 minutes.",
+            sections = listOf(
+                SafetySection("Definition", listOf("An ascent faster than 15 m/min, between 30 m and the surface, over a distance of at least 10 m.")),
+                SafetySection(
+                    "What to do",
+                    listOf(
+                        "Go back down within 3 minutes at most, to at least half the dive's depth.",
+                        "Stay there for 5 minutes.",
+                        "Come back up, adding to any stops shown by the computer or table: 1 minute at 6 m, then 5 minutes at 3 m.",
+                    ),
+                    numbered = true,
+                ),
+                SafetySection(
+                    "If going back down is impossible",
+                    listOf("Give oxygen and evacuate to a hyperbaric centre."),
+                ),
+                SafetySection(
+                    "Examples (30 m dive)",
+                    listOf(
+                        "No stop shown: go back down to 15 m or deeper for 5 min, then 1 min at 6 m and 5 min at 3 m.",
+                        "3 min at 3 m shown: go back down to 15 m or deeper for 5 min, then 1 min at 6 m and 8 min at 3 m.",
+                    ),
+                ),
+            ),
+        ),
+        SafetyCard(
+            id = "deco-interrupted",
+            title = "Interrupted mandatory stop",
+            summary = "Go back down within 3 minutes and add 3 minutes to the 3 m stop.",
+            sections = listOf(
+                SafetySection(
+                    "What to do",
+                    listOf(
+                        "Go back down within 3 minutes.",
+                        "Follow the decompression device's indications, adding 3 minutes to the 3 m stop.",
+                    ),
+                    numbered = true,
+                ),
+                SafetySection(
+                    "If going back down is impossible",
+                    listOf(
+                        "Sign of a possible accident, OR more than 3 minutes of stops not done: give oxygen and call the emergency services.",
+                        "No sign of a possible accident, AND less than 3 minutes of stops not done: observe for 3 hours and no diving for 24 hours. At the slightest sign that could suggest an accident: call the emergency services.",
+                    ),
+                ),
+            ),
+        ),
+        SafetyCard(
+            id = "yoyo",
+            title = "Multiple ascents (yo-yos)",
+            summary = "If possible, do not go above 6 m; limits recommended by the CTN.",
+            sections = listOf(
+                SafetySection(
+                    "What to do",
+                    listOf("With multiple ascents, they should, if possible, not go above the 6 m threshold."),
+                ),
+                SafetySection(
+                    "Maximum recommended by the CTN",
+                    listOf("4 ascents from 20 m", "3 ascents from 25 m or 30 m", "2 ascents from 40 m"),
+                ),
+            ),
+        ),
+    )
     override val languageSystem = "System"
     override val dataSection = "Data"
     override val dataHint = "Save your dives, sites and checklists to a file, or restore them from a backup."

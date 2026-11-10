@@ -83,6 +83,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** Durée d'affichage de l'écran de démarrage de l'appli, avant le fondu vers le contenu. */
@@ -93,6 +94,8 @@ private sealed interface Screen {
     data object Sites : Screen
     data object Centers : Screen
     data object Checklists : Screen
+    data object Safety : Screen
+    data class SafetyDetail(val id: String) : Screen
     data object Settings : Screen
     data class DiveDetail(val id: Long) : Screen
     data class DiveForm(val id: Long?, val siteId: Long?) : Screen
@@ -156,24 +159,30 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val incomingFile = IncomingFile.pending
     LaunchedEffect(incomingFile) {
         if (incomingFile != null) {
+            // Remettre `pending` à vide change la clé de cet effet et l'annulerait en plein décodage : le travail
+            // tourne donc dans le scope de la composition, que ce changement de clé ne touche pas.
             IncomingFile.pending = null
-            try {
-                incomingReading = true
-                val file = try {
-                    withContext(Dispatchers.Default) { ShearwaterImport.parse(incomingFile) }
-                } finally {
-                    incomingReading = false
+            scope.launch {
+                try {
+                    incomingReading = true
+                    val file = try {
+                        withContext(Dispatchers.Default) { ShearwaterImport.parse(incomingFile) }
+                    } finally {
+                        incomingReading = false
+                    }
+                    if (file.dives.isEmpty()) {
+                        notice = strings.shearwaterNone
+                    } else {
+                        incomingSkipped = file.skipped
+                        incomingPlan = state.planShearwaterImport(file.dives)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: ShearwaterImport.NotShearwaterException) {
+                    notice = strings.shearwaterInvalid
+                } catch (e: Exception) {
+                    notice = strings.importFailed(e.message ?: strings.unknownError)
                 }
-                if (file.dives.isEmpty()) {
-                    notice = strings.shearwaterNone
-                } else {
-                    incomingSkipped = file.skipped
-                    incomingPlan = state.planShearwaterImport(file.dives)
-                }
-            } catch (e: ShearwaterImport.NotShearwaterException) {
-                notice = strings.shearwaterInvalid
-            } catch (e: Exception) {
-                notice = strings.importFailed(e.message ?: strings.unknownError)
             }
         }
     }
@@ -200,7 +209,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
 
     SubAtlasTheme(state.settings.theme, strings, state.settings.ascent) {
         when (current) {
-            Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Settings -> Scaffold(
+            Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Safety, Screen.Settings -> Scaffold(
                 topBar = {
                     Bar(
                         when (current) {
@@ -208,6 +217,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             Screen.Sites -> strings.sitesTitle
                             Screen.Centers -> strings.centersTitle
                             Screen.Checklists -> strings.checklistsTitle
+                            Screen.Safety -> strings.safetyTitle
                             else -> strings.settingsTitle
                         },
                         null,
@@ -219,31 +229,43 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             selected = current == Screen.Dives,
                             onClick = { goTab(Screen.Dives) },
                             icon = { Text("🤿") },
-                            label = { Text(strings.tabDives, maxLines = 1) },
+                            label = { TabLabel(strings.tabDives) },
+                            alwaysShowLabel = false,
                         )
                         NavigationBarItem(
                             selected = current == Screen.Sites,
                             onClick = { goTab(Screen.Sites) },
                             icon = { Text("📍") },
-                            label = { Text(strings.tabSites) },
+                            label = { TabLabel(strings.tabSites) },
+                            alwaysShowLabel = false,
                         )
                         NavigationBarItem(
                             selected = current == Screen.Centers,
                             onClick = { goTab(Screen.Centers) },
                             icon = { Text("⚓") },
-                            label = { Text(strings.tabCenters) },
+                            label = { TabLabel(strings.tabCenters) },
+                            alwaysShowLabel = false,
                         )
                         NavigationBarItem(
                             selected = current == Screen.Checklists,
                             onClick = { goTab(Screen.Checklists) },
                             icon = { Text("✅") },
-                            label = { Text(strings.tabChecklists) },
+                            label = { TabLabel(strings.tabChecklists) },
+                            alwaysShowLabel = false,
+                        )
+                        NavigationBarItem(
+                            selected = current == Screen.Safety,
+                            onClick = { goTab(Screen.Safety) },
+                            icon = { Text("🛟") },
+                            label = { TabLabel(strings.tabSafety) },
+                            alwaysShowLabel = false,
                         )
                         NavigationBarItem(
                             selected = current == Screen.Settings,
                             onClick = { goTab(Screen.Settings) },
                             icon = { Text("⚙️") },
-                            label = { Text(strings.tabSettings) },
+                            label = { TabLabel(strings.tabSettings) },
+                            alwaysShowLabel = false,
                         )
                     }
                 },
@@ -262,6 +284,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     Screen.Centers ->
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) })
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) })
+                    Screen.Safety -> SafetyList(pad, actions, onOpen = { push(Screen.SafetyDetail(it)) })
                     else -> SettingsScreen(state, pad, onExport = ::startExport, onImport = ::startImport)
                 }
             }
@@ -275,7 +298,15 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         onEdit = { push(Screen.DiveForm(dive.id, null)) },
                         onDelete = { state.deleteDive(dive.id); pop() },
                         onOpenSite = { push(Screen.SiteDetail(it)) },
+                        onOpenProcedure = { push(Screen.SafetyDetail(SAFETY_FAST_ASCENT)) },
                     )
+                }
+            }
+
+            is Screen.SafetyDetail -> {
+                val card = strings.safetyCards.firstOrNull { it.id == current.id }
+                if (card == null) pop() else Scaffold(topBar = { Bar(card.title, ::pop) }) { pad ->
+                    SafetyDetail(card, pad, actions)
                 }
             }
 
@@ -509,6 +540,12 @@ private fun ColorChoice(palette: List<Long>, selected: Int, noneLabel: String?, 
             }
         }
     }
+}
+
+/** Libellé d'un onglet : sur une seule ligne et un peu plus petit, seul l'onglet actif affiche son libellé. */
+@Composable
+private fun TabLabel(text: String) {
+    Text(text, fontSize = 11.sp, maxLines = 1, softWrap = false)
 }
 
 @Composable

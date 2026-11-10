@@ -371,7 +371,7 @@ private fun AppState.sortedDives(sort: DiveSort, descending: Boolean): List<Dive
 private fun Dive.suitSummary(s: Strings): String? {
     val type = suitType
     return if (type != null) {
-        listOfNotNull(s.suitType(type), suitThicknessMm?.let { "${formatNum(it)} mm" }).joinToString(" ")
+        listOfNotNull(s.suitType(type), suitThicknessMm?.let { "${formatNum(it)} mm" }).joinToString(" - ")
     } else {
         suit.takeIf { it.isNotBlank() }
     }
@@ -437,6 +437,7 @@ internal fun DiveDetailView(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onOpenSite: (Long) -> Unit,
+    onOpenProcedure: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     var confirm by remember { mutableStateOf(false) }
@@ -465,7 +466,7 @@ internal fun DiveDetailView(
         dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
         dive.maxDepth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
         dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
-        dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth(), onFullscreen = { fullscreen = true }) }
+        dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth(), onFullscreen = { fullscreen = true }, onOpenProcedure = onOpenProcedure) }
 
         dive.tanks.forEachIndexed { i, tank ->
             Card(
@@ -498,13 +499,14 @@ internal fun DiveDetailView(
         }
         dive.waterTempC?.let { Text(s.labelled(s.waterTemp, "${formatNum(it)} °C")) }
         dive.visibilityMeters?.let { Text(s.labelled(s.visibility, "$it m")) }
-        dive.weightKg?.let { Text(s.labelled(s.weight, "${formatNum(it)} kg")) }
         val suitText = listOfNotNull(
-            dive.suitType?.let { s.suitType(it) },
-            dive.suitThicknessMm?.let { "${formatNum(it)} mm" },
+            // « Humide - 5 mm » ; l'épaisseur n'est ajoutée que si elle est renseignée.
+            listOfNotNull(dive.suitType?.let { s.suitType(it) }, dive.suitThicknessMm?.let { "${formatNum(it)} mm" })
+                .joinToString(" - ").takeIf { it.isNotEmpty() },
             dive.suit.takeIf { it.isNotBlank() },
         ).joinToString(" · ")
         if (suitText.isNotEmpty()) Text(s.labelled(s.suit, suitText))
+        dive.weightKg?.let { Text(s.labelled(s.weight, "${formatNum(it)} kg")) }
         if (dive.buddy.isNotBlank()) Text(s.labelled(s.buddy, dive.buddy))
         if (dive.group.isNotEmpty()) Text(s.labelled(s.groupSection, dive.group.joinToString(", ") { it.name }))
         if (dive.computer.isNotBlank()) Text(s.labelled(s.computerLabel, dive.computer))
@@ -857,10 +859,7 @@ internal fun DiveForm(
         // --- Conditions et matériel
         Text(s.conditionsSection, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         NumField(s.waterTemp, waterTemp, { waterTemp = it }, Modifier.fillMaxWidth(), error = waterTemp.isNotBlank() && waterTemp.toDec() == null, unit = "°C")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            NumField(s.visibility, visibility, { visibility = it }, Modifier.weight(1f), decimal = false, error = visibility.isNotBlank() && visibility.trim().toIntOrNull() == null, unit = "m")
-            NumField(s.weight, weight, { weight = it }, Modifier.weight(1f), error = weight.isNotBlank() && weight.toDec() == null, unit = "kg")
-        }
+        NumField(s.visibility, visibility, { visibility = it }, Modifier.fillMaxWidth(), decimal = false, error = visibility.isNotBlank() && visibility.trim().toIntOrNull() == null, unit = "m")
         Text(s.suit, style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SuitType.entries.forEach { type ->
@@ -876,6 +875,8 @@ internal fun DiveForm(
         if (suitType?.hasThickness == true) {
             NumField(s.thickness, thickness, { thickness = it }, Modifier.fillMaxWidth(), error = thickness.isNotBlank() && thickness.toDec() == null, unit = "mm")
         }
+        // La combinaison avant le lestage, comme dans la fiche.
+        NumField(s.weight, weight, { weight = it }, Modifier.fillMaxWidth(), error = weight.isNotBlank() && weight.toDec() == null, unit = "kg")
         BuddyField(
             state = state,
             contacts = contacts,
