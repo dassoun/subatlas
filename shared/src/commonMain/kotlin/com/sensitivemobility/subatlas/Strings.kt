@@ -401,6 +401,7 @@ object FrStrings : Strings {
         DiveKind.EXPLORATION -> "Exploration"
         DiveKind.SUPERVISING -> "Encadrement"
         DiveKind.TEACHING -> "Enseignement"
+        DiveKind.AUTONOMOUS -> "Autonomie"
         DiveKind.OTHER -> "Autre"
     }
     override val kindOtherField = "Précisez le type de plongée"
@@ -777,6 +778,7 @@ object EnStrings : Strings {
         DiveKind.EXPLORATION -> "Exploration"
         DiveKind.SUPERVISING -> "Supervising"
         DiveKind.TEACHING -> "Teaching"
+        DiveKind.AUTONOMOUS -> "Autonomous"
         DiveKind.OTHER -> "Other"
     }
     override val kindOtherField = "Describe the dive type"

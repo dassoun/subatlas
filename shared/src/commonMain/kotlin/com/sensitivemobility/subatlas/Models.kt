@@ -141,6 +141,7 @@ enum class DiveKind {
     EXPLORATION,
     SUPERVISING,
     TEACHING,
+    AUTONOMOUS,
     OTHER;
 
     /** Encadrement et enseignement se font avec une palanquée. */

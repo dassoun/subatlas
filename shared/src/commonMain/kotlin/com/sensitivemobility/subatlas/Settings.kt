@@ -86,6 +86,7 @@ internal fun DiveKind.defaultColorIndex(): Int = when (this) {
     DiveKind.LEARNING -> 1
     DiveKind.SUPERVISING -> 2
     DiveKind.TEACHING -> 3
+    DiveKind.AUTONOMOUS -> 4
     DiveKind.OTHER -> -1
 }
 
