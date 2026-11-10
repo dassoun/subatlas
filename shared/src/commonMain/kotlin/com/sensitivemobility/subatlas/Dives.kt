@@ -10,9 +10,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -53,7 +59,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -85,7 +93,11 @@ private fun nowTime(): Pair<Int, Int> {
 private fun timeText(hour: Int, minute: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
 
 /** Entier sans « .0 » ; sinon le nombre tel quel. */
-internal fun formatNum(d: Double): String = if (d % 1.0 == 0.0) d.toLong().toString() else d.toString()
+internal fun formatNum(d: Double): String {
+    // Arrondi à 2 décimales : écarte les artefacts de virgule flottante (9.900001) des données importées.
+    val r = round(d * 100) / 100
+    return if (r % 1.0 == 0.0) r.toLong().toString() else r.toString()
+}
 
 /** Distance à vol d'oiseau en mètres (formule de haversine). */
 internal fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -141,6 +153,9 @@ internal fun DiveList(
     var pasting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var planSkipped by remember { mutableStateOf(0) }
+    var reading by remember { mutableStateOf(false) }
+    var mergeAsk by remember { mutableStateOf<Pair<Dive, Dive>?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
     // Import d'un export Shearwater Cloud : on lit le fichier, on prépare la fusion, puis l'utilisateur confirme.
@@ -148,8 +163,19 @@ internal fun DiveList(
         scope.launch {
             try {
                 val bytes = actions.openFileBytes() ?: return@launch
-                val found = ShearwaterImport.parse(bytes)
-                if (found.isEmpty()) message = s.shearwaterNone else plan = state.planShearwaterImport(found)
+                reading = true
+                // Un gros fichier se lit en quelques secondes : hors du fil principal pour ne pas figer l'écran.
+                val file = try {
+                    withContext(Dispatchers.Default) { ShearwaterImport.parse(bytes) }
+                } finally {
+                    reading = false
+                }
+                if (file.dives.isEmpty()) {
+                    message = s.shearwaterNone
+                } else {
+                    planSkipped = file.skipped
+                    plan = state.planShearwaterImport(file.dives)
+                }
             } catch (e: ShearwaterImport.NotShearwaterException) {
                 message = s.shearwaterInvalid
             } catch (e: Exception) {
@@ -194,13 +220,27 @@ internal fun DiveList(
                 Card(
                     onClick = { onOpen(dive.id) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    colors = CardDefaults.cardColors(containerColor = diveCardColor(dive.kind, state.settings)),
                 ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
-                        val diveSite = state.site(dive.siteId)
-                        if (diveSite != null) SiteLine(diveSite, MaterialTheme.typography.bodyMedium) else Text("?")
-                        Text(dive.listSummary(s), style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.height(IntrinsicSize.Min).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1.4f)) {
+                            val previous = if (dive.noMerge) null else state.mergeCandidate(dive)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
+                                if (previous != null) {
+                                    Spacer(Modifier.width(10.dp))
+                                    MergeMenuChip(
+                                        onMerge = { mergeAsk = previous to dive },
+                                        onNoMerge = { state.setNoMerge(dive.id) },
+                                    )
+                                }
+                            }
+                            val diveSite = state.site(dive.siteId)
+                            if (diveSite != null) SiteLine(diveSite, MaterialTheme.typography.bodyMedium, maxLines = 1) else Text("?")
+                            Text(dive.listCompact(s), style = MaterialTheme.typography.bodySmall)
+                        }
+                        // La moitié droite de la carte, sur toute sa hauteur.
+                        dive.profile?.let { ProfileSparkline(it, Modifier.weight(1f).fillMaxHeight()) }
                     }
                 }
             }
@@ -212,9 +252,12 @@ internal fun DiveList(
         }
     }
     if (pasting) PasteSharedDialog(onDismiss = { pasting = false }) { pasting = false; onShared(it) }
+    mergeAsk?.let { (earlier, later) -> MergeDialog(state, earlier, later) { mergeAsk = null } }
+    if (reading) ReadingDialog()
     plan?.let { items ->
         ShearwaterPlanDialog(
             items,
+            planSkipped,
             onConfirm = {
                 val (created, merged) = state.applyShearwaterImport(items)
                 plan = null
@@ -232,9 +275,39 @@ internal fun DiveList(
     }
 }
 
+/** Confirmation de la fusion de [later] dans [earlier]. */
+@Composable
+internal fun MergeDialog(state: AppState, earlier: Dive, later: Dive, onDone: () -> Unit) {
+    val s = LocalStrings.current
+    fun label(d: Dive) = "${s.dateText(d.date)} ${d.timeRangeText(s).orEmpty()}".trim()
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text(s.mergeTitle) },
+        text = { Text(s.mergeMessage(label(earlier), label(later))) },
+        confirmButton = { TextButton(onClick = { state.mergeWithPrevious(later.id); onDone() }) { Text(s.mergeAction) } },
+        dismissButton = { TextButton(onClick = onDone) { Text(s.cancel) } },
+    )
+}
+
+/** Message d'attente pendant la lecture d'un gros fichier. */
+@Composable
+internal fun ReadingDialog() {
+    val s = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = {},
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CircularProgressIndicator(Modifier.size(32.dp))
+                Text(s.shearwaterReading)
+            }
+        },
+        confirmButton = {},
+    )
+}
+
 /** Aperçu de l'import : ce qui sera ajouté et ce qui sera fusionné avec une plongée du carnet. */
 @Composable
-private fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, skipped: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val s = LocalStrings.current
     val merged = items.count { it.mergeInto != null }
     AlertDialog(
@@ -243,7 +316,8 @@ private fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, onConfirm: () 
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(s.shearwaterFound(items.size, items.size - merged, merged))
-                items.forEach { item ->
+                // Un gros fichier : on montre les premières plongées, le résumé du dessus donne les totaux.
+                items.take(12).forEach { item ->
                     val sw = item.dive
                     Column {
                         Text(
@@ -262,6 +336,8 @@ private fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, onConfirm: () 
                         )
                     }
                 }
+                if (items.size > 12) Text(s.shearwaterMore(items.size - 12), style = MaterialTheme.typography.bodyMedium)
+                if (skipped > 0) Text(s.shearwaterSkipped(skipped), style = MaterialTheme.typography.bodySmall, color = StatusWarn)
                 if (merged > 0) Text(s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -302,6 +378,12 @@ private fun Dive.suitSummary(s: Strings): String? {
 }
 
 /** Ligne de résumé de la liste : horaires, profondeur max, eau, combinaison, volumes, lestage. */
+/** Résumé de la liste : durée et profondeur seulement. */
+private fun Dive.listCompact(s: Strings): String = listOfNotNull(
+    durationMinutes?.let { s.minutesShort(it) },
+    maxDepth?.let { "max ${formatNum(it)} m" },
+).joinToString(" · ")
+
 private fun Dive.listSummary(s: Strings): String {
     val volumes = tanks.mapNotNull { it.volumeLiters }.takeIf { it.isNotEmpty() }
         ?.joinToString(" + ") { formatNum(it) }?.let { "$it\u00A0L" }
@@ -360,7 +442,9 @@ internal fun DiveDetailView(
     var confirm by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
+    var merging by remember { mutableStateOf(false) }
     val site = state.site(dive.siteId)
+    val previousDive = state.mergeCandidate(dive)
     val recipients = dive.shareRecipients
     val canShare = site != null && recipients.isNotEmpty()
     Column(
@@ -438,10 +522,19 @@ internal fun DiveDetailView(
                 Text(if (recipients.size == 1) s.shareButton(recipients[0].name) else s.shareWithPeople)
             }
         }
+        // Dans la fiche, la fusion reste proposée même si on a refusé qu'elle le soit dans la liste.
+        if (previousDive != null) {
+            OutlinedButton(onClick = { merging = true }, modifier = Modifier.fillMaxWidth()) {
+                MergeIcon(crossed = false)
+                Spacer(Modifier.width(8.dp))
+                Text(s.mergePrevious)
+            }
+        }
         Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text(s.edit) }
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
     }
     if (sharing && site != null) ShareDiveDialog(dive, site, actions, recipients) { sharing = false }
+    if (merging && previousDive != null) MergeDialog(state, previousDive, dive) { merging = false }
     dive.profile?.let { if (fullscreen) ProfileFullscreen(it, actions) { fullscreen = false } }
     if (confirm) {
         ConfirmDialog(
@@ -844,6 +937,11 @@ internal fun DiveForm(
                         kind = kind,
                         kindOther = if (kind == DiveKind.OTHER) kindOther.trim() else "",
                         group = if (kind?.hasGroup == true) group.filter { it.name.isNotBlank() }.map { it.toPerson() } else emptyList(),
+                        // Ce que le formulaire ne montre pas (données de l'ordinateur de plongée) doit survivre à la modification.
+                        computer = existing?.computer.orEmpty(),
+                        importKey = existing?.importKey.orEmpty(),
+                        noMerge = existing?.noMerge ?: false,
+                        profile = existing?.profile,
                     )
                 state.saveDive(dive)
                 // Qui proposer de joindre : le binôme et/ou la palanquée, selon les cases cochées.

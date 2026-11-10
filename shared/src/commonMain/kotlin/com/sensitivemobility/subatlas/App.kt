@@ -5,6 +5,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -65,6 +68,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
@@ -75,7 +79,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlinx.coroutines.launch
 
@@ -132,6 +138,9 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var pendingImport by remember { mutableStateOf<ImportData?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var sharedIncoming by remember { mutableStateOf<SharedDive?>(null) }
+    var incomingPlan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var incomingSkipped by remember { mutableStateOf(0) }
+    var incomingReading by remember { mutableStateOf(false) }
 
     // Lien de plongée ouvert depuis un message (ou collé) : on propose de l'ajouter au carnet.
     val incoming = IncomingLink.pending
@@ -140,6 +149,32 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             val decoded = DiveLink.decode(incoming)
             IncomingLink.pending = null
             if (decoded != null) sharedIncoming = decoded else notice = strings.sharedInvalid
+        }
+    }
+
+    // Export Shearwater reçu par « Partager > SubAtlas » ou « Ouvrir avec » : on prépare l'import et on demande confirmation.
+    val incomingFile = IncomingFile.pending
+    LaunchedEffect(incomingFile) {
+        if (incomingFile != null) {
+            IncomingFile.pending = null
+            try {
+                incomingReading = true
+                val file = try {
+                    withContext(Dispatchers.Default) { ShearwaterImport.parse(incomingFile) }
+                } finally {
+                    incomingReading = false
+                }
+                if (file.dives.isEmpty()) {
+                    notice = strings.shearwaterNone
+                } else {
+                    incomingSkipped = file.skipped
+                    incomingPlan = state.planShearwaterImport(file.dives)
+                }
+            } catch (e: ShearwaterImport.NotShearwaterException) {
+                notice = strings.shearwaterInvalid
+            } catch (e: Exception) {
+                notice = strings.importFailed(e.message ?: strings.unknownError)
+            }
         }
     }
 
@@ -163,7 +198,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
         }
     }
 
-    SubAtlasTheme(state.settings.theme, strings) {
+    SubAtlasTheme(state.settings.theme, strings, state.settings.ascent) {
         when (current) {
             Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Settings -> Scaffold(
                 topBar = {
@@ -294,6 +329,20 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             }
         }
 
+        if (incomingReading) ReadingDialog()
+        incomingPlan?.let { items ->
+            ShearwaterPlanDialog(
+                items,
+                incomingSkipped,
+                onConfirm = {
+                    val (created, merged) = state.applyShearwaterImport(items)
+                    incomingPlan = null
+                    goTab(Screen.Dives)
+                    notice = strings.shearwaterDone(created, merged)
+                },
+                onDismiss = { incomingPlan = null },
+            )
+        }
         sharedIncoming?.let { shared ->
             SharedDiveDialog(
                 shared,
@@ -391,10 +440,74 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
             },
         ) { choice -> state.updateSettings { it.copy(language = choice) } }
 
+        SectionTitle(s.kindColorsSection)
+        Text(s.kindColorsHint, style = MaterialTheme.typography.bodyMedium)
+        DiveKind.entries.forEach { kind ->
+            Text(s.diveKind(kind), style = MaterialTheme.typography.bodyLarge)
+            ColorChoice(DIVE_PALETTE, selected = state.settings.colorIndex(kind), noneLabel = s.colorNone) { index ->
+                state.updateSettings { it.copy(kindColors = it.kindColors + (kind.name to index)) }
+            }
+        }
+
+        SectionTitle(s.ascentSection)
+        Text(s.ascentHint, style = MaterialTheme.typography.bodyMedium)
+        val ascent = state.settings.ascent
+        fun set(transform: (AscentScale) -> AscentScale) = state.updateSettings { it.copy(ascent = transform(it.ascent)) }
+        Text(s.ascentLevel(1), style = MaterialTheme.typography.bodyLarge)
+        Stepper(s.ascentLimit(ascent.yellowAbove), { set { a -> a.copy(yellowAbove = (a.yellowAbove - 1).coerceAtLeast(1)) } },
+            { set { a -> a.copy(yellowAbove = (a.yellowAbove + 1).coerceAtMost(a.orangeAbove - 1)) } })
+        ColorChoice(ASCENT_PALETTE, ascent.yellowColor, null) { i -> set { a -> a.copy(yellowColor = i) } }
+        Text(s.ascentLevel(2), style = MaterialTheme.typography.bodyLarge)
+        Stepper(s.ascentLimit(ascent.orangeAbove), { set { a -> a.copy(orangeAbove = (a.orangeAbove - 1).coerceAtLeast(a.yellowAbove + 1)) } },
+            { set { a -> a.copy(orangeAbove = (a.orangeAbove + 1).coerceAtMost(a.redAbove - 1)) } })
+        ColorChoice(ASCENT_PALETTE, ascent.orangeColor, null) { i -> set { a -> a.copy(orangeColor = i) } }
+        Text(s.ascentLevel(3), style = MaterialTheme.typography.bodyLarge)
+        Stepper(s.ascentLimit(ascent.redAbove), { set { a -> a.copy(redAbove = (a.redAbove - 1).coerceAtLeast(a.orangeAbove + 1)) } },
+            { set { a -> a.copy(redAbove = (a.redAbove + 1).coerceAtMost(99)) } })
+        ColorChoice(ASCENT_PALETTE, ascent.redColor, null) { i -> set { a -> a.copy(redColor = i) } }
+        TextButton(onClick = { set { AscentScale() } }) { Text(s.ascentReset) }
+
         SectionTitle(s.dataSection)
         Text(s.dataHint, style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text(s.exportData) }
         OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text(s.importData) }
+    }
+}
+
+/** Valeur réglable par pas de un : un bouton « − », la valeur, un bouton « + ». */
+@Composable
+private fun Stepper(text: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onMinus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Text("−") }
+        Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 130.dp))
+        OutlinedButton(onClick = onPlus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Text("+") }
+    }
+}
+
+/** Rangée de pastilles d'une [palette] ; avec [noneLabel], la première (barrée) retire la couleur. */
+@Composable
+private fun ColorChoice(palette: List<Long>, selected: Int, noneLabel: String?, onSelect: (Int) -> Unit) {
+    val ring = MaterialTheme.colorScheme.onSurface
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        ((if (noneLabel != null) listOf(-1) else emptyList()) + palette.indices).forEach { index ->
+            val color = palette.getOrNull(index)?.let { Color(it) }
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(color ?: MaterialTheme.colorScheme.surfaceVariant)
+                    .then(if (index == selected) Modifier.border(3.dp, ring, CircleShape) else Modifier)
+                    .clickable { onSelect(index) }
+                    .semantics { if (color == null && noneLabel != null) contentDescription = noneLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (color == null) {
+                    Canvas(Modifier.size(18.dp)) {
+                        drawLine(ring, Offset(size.width, 0f), Offset(0f, size.height), 2.dp.toPx(), StrokeCap.Round)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -695,6 +808,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var itemToDelete by remember { mutableStateOf<ChecklistItem?>(null) }
+    var itemToEdit by remember { mutableStateOf<ChecklistItem?>(null) }
 
     val listState = rememberLazyListState()
     var draggingId by remember { mutableStateOf<Long?>(null) }
@@ -756,7 +870,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
                                 }
                             },
                     )
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f).clickable { itemToEdit = item }) {
                         Text(item.text, style = MaterialTheme.typography.titleMedium)
                         item.state.caption(s)?.let { (label, color) ->
                             Text(label, style = MaterialTheme.typography.labelMedium, color = color)
@@ -772,7 +886,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
             Button(onClick = { addingItem = true }, modifier = Modifier.fillMaxWidth()) { Text(s.addItem) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { state.resetChecklist(list.id) }, modifier = Modifier.weight(1f)) {
-                    Text(s.resetAll)
+                    Text(s.resetAll, maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(onClick = { renaming = true }, modifier = Modifier.weight(1f)) { Text(s.rename) }
             }
@@ -791,6 +905,12 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
         TextPromptDialog(s.rename, s.titleField, initial = list.title, onDismiss = { renaming = false }) {
             renaming = false
             state.renameChecklist(list.id, it)
+        }
+    }
+    itemToEdit?.let { item ->
+        TextPromptDialog(s.editItem, s.textField, initial = item.text, onDismiss = { itemToEdit = null }) {
+            itemToEdit = null
+            state.editItem(list.id, item.id, it)
         }
     }
     itemToDelete?.let { item ->
@@ -883,8 +1003,14 @@ private fun TextPromptDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(text, { text = it }, label = { Text(label) }, singleLine = true) },
-        confirmButton = { TextButton(enabled = text.isNotBlank(), onClick = { onOk(text.trim()) }) { Text(s.ok) } },
+        text = {
+            OutlinedTextField(
+                text, { text = it }, label = { Text(label) }, singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            )
+        },
+        // Première lettre en majuscule, quelle que soit la façon dont le texte a été saisi.
+        confirmButton = { TextButton(enabled = text.isNotBlank(), onClick = { onOk(text.trim().replaceFirstChar { it.uppercase() }) }) { Text(s.ok) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
     )
 }

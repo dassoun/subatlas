@@ -111,10 +111,10 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     // --- Sites ---
     fun site(id: Long) = sites.firstOrNull { it.id == id }
 
-    fun saveSite(site: DiveSite) {
+    fun saveSite(site: DiveSite, persist: Boolean = true) {
         val i = sites.indexOfFirst { it.id == site.id }
         if (i >= 0) sites[i] = site else sites.add(site)
-        saveSites()
+        if (persist) saveSites()
     }
 
     /** Supprime aussi les plongées faites sur ce site. */
@@ -135,8 +135,9 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
      */
     internal fun planShearwaterImport(list: List<ShearwaterDive>): List<ShearwaterPlanItem> {
         val taken = HashSet<Long>()
-        return list.map { sw ->
-            val match = dives.firstOrNull { it.importKey == sw.key && it.id !in taken } ?: closestByTime(sw, taken)
+        return list.sortedByDescending { it.date + " " + it.startTime.orEmpty() }.map { sw ->
+            // Une plongée issue d'une fusion porte plusieurs clés : chacune la retrouve, sans en refaire une nouvelle.
+            val match = dives.firstOrNull { sw.key in it.importKeys() } ?: closestByTime(sw, taken)
             if (match != null) taken += match.id
             ShearwaterPlanItem(sw, match)
         }
@@ -162,15 +163,18 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         var created = 0
         var merged = 0
         for (item in plan) {
-            val existing = item.mergeInto
+            val existing = item.mergeInto?.let { dive(it.id) ?: it }
             if (existing != null) {
-                saveDive(mergeShearwater(existing, item.dive))
+                saveDive(mergeShearwater(existing, item.dive), persist = false)
                 merged++
             } else {
-                saveDive(newDiveFrom(item.dive))
+                saveDive(newDiveFrom(item.dive), persist = false)
                 created++
             }
         }
+        // Un gros import ne réécrit les fichiers qu'une fois (et non à chaque plongée).
+        saveSites()
+        saveDives()
         return created to merged
     }
 
@@ -184,7 +188,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         return DiveSite(
             id = newId(), name = name, country = sw.country, latitude = sw.latitude, longitude = sw.longitude,
             notes = if (sw.siteName.isNotBlank()) sw.siteNotes else "",
-        ).also { saveSite(it) }
+        ).also { saveSite(it, persist = false) }
     }
 
     private fun newDiveFrom(sw: ShearwaterDive): Dive = Dive(
@@ -209,6 +213,8 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     /** Complète la plongée du carnet avec les données de l'ordinateur, sans écraser ce que l'utilisateur a saisi. */
     private fun mergeShearwater(d: Dive, sw: ShearwaterDive): Dive {
+        // Plongée issue d'une fusion : sa courbe et ses heures sont déjà complètes.
+        if (d.importKeys().size > 1) return d
         val tanks = d.tanks.toMutableList()
         sw.tanks.forEachIndexed { i, t ->
             if (i < tanks.size) {
@@ -281,9 +287,34 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     fun divesAt(siteId: Long) = dives.filter { it.siteId == siteId }.sortedWith(diveOrder)
 
-    fun saveDive(dive: Dive) {
+    fun saveDive(dive: Dive, persist: Boolean = true) {
         val i = dives.indexOfFirst { it.id == dive.id }
         if (i >= 0) dives[i] = dive else dives.add(dive)
+        if (persist) saveDives()
+    }
+
+    /** La plongée du même jour qui précède [d] de moins de [MERGE_GAP_MINUTES] minutes (fin de l'une, début de l'autre). */
+    fun mergeCandidate(d: Dive): Dive? {
+        val start = minutesOfDay(d.startTime) ?: return null
+        return dives.filter { it.id != d.id && it.date == d.date }
+            .mapNotNull { p ->
+                val ps = minutesOfDay(p.startTime) ?: return@mapNotNull null
+                val pe = minutesOfDay(p.endTime) ?: return@mapNotNull null
+                if (pe >= ps && start - pe in 0 until MERGE_GAP_MINUTES) p to ps else null
+            }
+            .maxByOrNull { it.second }?.first
+    }
+
+    fun setNoMerge(id: Long) {
+        dive(id)?.let { saveDive(it.copy(noMerge = true)) }
+    }
+
+    /** Fusionne la plongée [id] avec la précédente et supprime la plongée absorbée. */
+    fun mergeWithPrevious(id: Long) {
+        val later = dive(id) ?: return
+        val earlier = mergeCandidate(later) ?: return
+        dives.removeAll { it.id == later.id }
+        saveDive(mergeDives(earlier, later), persist = false)
         saveDives()
     }
 
@@ -330,6 +361,9 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     fun renameChecklist(id: Long, title: String) = update(id) { it.copy(title = title) }
+
+    fun editItem(listId: Long, itemId: Long, text: String) =
+        update(listId) { c -> c.copy(items = c.items.map { if (it.id == itemId) it.copy(text = text) else it }) }
 
     fun addItem(listId: Long, text: String) =
         update(listId) { it.copy(items = it.items + ChecklistItem(newId(), text)) }

@@ -83,6 +83,11 @@ object IncomingLink {
     var pending: String? by mutableStateOf(null)
 }
 
+/** Fichier reçu d'une autre appli (partage ou « Ouvrir avec ») ; consommé par l'écran principal. */
+object IncomingFile {
+    var pending: ByteArray? by mutableStateOf(null)
+}
+
 /** Encodage pour pourcent (UTF-8) d'un texte placé dans un lien `sms:` ou `mailto:`. */
 internal fun urlEncode(text: String): String = buildString {
     for (b in text.encodeToByteArray()) {

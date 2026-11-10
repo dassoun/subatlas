@@ -2,7 +2,10 @@ package com.sensitivemobility.subatlas
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +21,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,13 +56,6 @@ import kotlin.math.roundToInt
 
 private val PressureColor = Color(0xFF8E7CC3)
 
-/** Couleur d'un tronçon de remontée trop rapide ; `null` tant que la vitesse reste raisonnable. */
-private fun ascentColor(rate: Double): Color? = when {
-    rate > ASCENT_RATE_DANGER -> StatusKo
-    rate > ASCENT_RATE_WARN -> StatusWarn
-    else -> null
-}
-
 /**
  * Courbe d'une plongée : profondeur en fonction du temps (la surface en haut), pression de la bouteille s'il y avait un
  * capteur, et vitesse de remontée (tronçons orange puis rouges quand elle devient rapide, bilan sous la courbe). Un appui
@@ -83,7 +82,8 @@ internal fun ProfileChart(
     val n = profile.depthDm.size
     val rates = remember(profile) { profile.ascentRates() }
     val maxRate = rates.maxOrNull() ?: 0.0
-    val secondsOver = rates.count { it > ASCENT_RATE_WARN } * profile.intervalSeconds
+    val scale = LocalAscentScale.current
+    val secondsOver = rates.count { it > scale.yellowAbove } * profile.intervalSeconds
     val hasPressure = profile.pressureBar.size == n && profile.pressureBar.any { it > 0 }
     val maxDepth = max(5.0, ceil((profile.depthDm.maxOrNull() ?: 0) / 10.0 / 5.0) * 5.0)
     val maxPressure = if (hasPressure) ceil((profile.pressureBar.maxOrNull() ?: 0) / 50.0) * 50.0 else 0.0
@@ -98,6 +98,50 @@ internal fun ProfileChart(
         width = w - 34f * density - (if (hasPressure) 38f else 10f) * density,
         height = h - 8f * density - 22f * density,
     )
+
+    // Fenêtre visible (en indices d'échantillons, fractionnaires) : zoomée horizontalement à deux doigts en plein écran.
+    val fullSpan = max(1, n - 1).toFloat()
+    var viewStart by remember(profile) { mutableStateOf(0f) }
+    var viewSpan by remember(profile) { mutableStateOf(fullSpan) }
+
+    fun indexAt(x: Float, density: Float): Int {
+        val p = plot(density, canvasSize.width.toFloat(), canvasSize.height.toFloat())
+        return (viewStart + (x - p.left) / p.width * viewSpan).roundToInt().coerceIn(0, n - 1)
+    }
+
+    // Doigt posé en lecture (x en pixels) : tant qu'il reste près d'un bord de la courbe zoomée, la fenêtre défile.
+    var holdX by remember(profile) { mutableStateOf<Float?>(null) }
+    val screenDensity = LocalDensity.current.density
+    LaunchedEffect(holdX != null, profile) {
+        while (holdX != null) {
+            delay(16)
+            val x = holdX ?: break
+            if (viewSpan >= fullSpan) continue
+            val p = plot(screenDensity, canvasSize.width.toFloat(), canvasSize.height.toFloat())
+            val edge = 48f * screenDensity
+            val push = when {
+                x < p.left + edge -> -((p.left + edge - x) / edge).coerceIn(0f, 1.5f)
+                x > p.left + p.width - edge -> ((x - (p.left + p.width - edge)) / edge).coerceIn(0f, 1.5f)
+                else -> 0f
+            }
+            if (push != 0f) {
+                // Au bord : une demi-fenêtre par seconde.
+                viewStart = (viewStart + push * 0.5f * viewSpan * 0.016f).coerceIn(0f, fullSpan - viewSpan)
+                selected = indexAt(x, screenDensity)
+            }
+        }
+    }
+
+    /** Applique un zoom horizontal [factor] et un déplacement du centre des doigts de [fromX] à [toX]. */
+    fun zoomPan(factor: Float, fromX: Float, toX: Float, density: Float) {
+        val p = plot(density, canvasSize.width.toFloat(), canvasSize.height.toFloat())
+        if (p.width <= 0f) return
+        val anchor = viewStart + (fromX - p.left) / p.width * viewSpan
+        val minSpan = minOf(fullSpan, 8f)
+        val span = (viewSpan / factor).coerceIn(minSpan, fullSpan)
+        viewSpan = span
+        viewStart = (anchor - (toX - p.left) / p.width * span).coerceIn(0f, fullSpan - span)
+    }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -132,22 +176,54 @@ internal fun ProfileChart(
         Canvas(
             (if (fullscreen) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().height(210.dp))
                 .onSizeChanged { canvasSize = it }
-                .pointerInput(profile) {
-                    detectTapGestures { pos ->
-                        val p = plot(density, canvasSize.width.toFloat(), canvasSize.height.toFloat())
-                        selected = (((pos.x - p.left) / p.width) * (n - 1)).roundToInt().coerceIn(0, n - 1)
-                    }
-                }
-                .pointerInput(profile) {
-                    detectHorizontalDragGestures { change, _ ->
-                        change.consume()
-                        val p = plot(density, canvasSize.width.toFloat(), canvasSize.height.toFloat())
-                        selected = (((change.position.x - p.left) / p.width) * (n - 1)).roundToInt().coerceIn(0, n - 1)
-                    }
-                },
+                .then(
+                    if (fullscreen) {
+                        // Un doigt : lecture du point ; deux doigts : zoom (écartement horizontal) et déplacement.
+                        Modifier.pointerInput(profile) {
+                            detectTapGestures(onDoubleTap = { viewStart = 0f; viewSpan = fullSpan })
+                        }.pointerInput(profile) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                selected = indexAt(down.position.x, density)
+                                holdX = down.position.x
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val pts = event.changes.filter { it.pressed }
+                                    if (pts.size >= 2) {
+                                        val a = pts[0]
+                                        val b = pts[1]
+                                        val span = abs(a.position.x - b.position.x)
+                                        val prevSpan = abs(a.previousPosition.x - b.previousPosition.x)
+                                        val centre = (a.position.x + b.position.x) / 2f
+                                        val prevCentre = (a.previousPosition.x + b.previousPosition.x) / 2f
+                                        if (span > 8f && prevSpan > 8f) zoomPan(span / prevSpan, prevCentre, centre, density)
+                                        holdX = null
+                                        event.changes.forEach { it.consume() }
+                                    } else if (pts.size == 1) {
+                                        selected = indexAt(pts[0].position.x, density)
+                                        holdX = pts[0].position.x
+                                        pts[0].consume()
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                holdX = null
+                            }
+                        }
+                    } else {
+                        Modifier
+                            .pointerInput(profile) {
+                                detectTapGestures { pos -> selected = indexAt(pos.x, density) }
+                            }
+                            .pointerInput(profile) {
+                                detectHorizontalDragGestures { change, _ ->
+                                    change.consume()
+                                    selected = indexAt(change.position.x, density)
+                                }
+                            }
+                    },
+                ),
         ) {
             val p = plot(density, size.width, size.height)
-            fun x(i: Int) = p.left + p.width * (if (n <= 1) 0f else i.toFloat() / (n - 1))
+            fun x(i: Int) = p.left + p.width * (if (n <= 1) 0f else (i - viewStart) / viewSpan)
             fun yDepth(dm: Int) = p.top + p.height * (dm / 10f / maxDepth.toFloat())
 
             // Grille : une ligne tous les 5 m, avec la profondeur à gauche.
@@ -159,16 +235,18 @@ internal fun ProfileChart(
                 drawText(t, topLeft = Offset(p.left - t.size.width - 4f * density, y - t.size.height / 2f))
                 d += 5.0
             }
-            // Repères de temps : au plus huit, en minutes entières.
-            val minutes = total / 60.0
-            val step = listOf(1, 2, 5, 10, 15, 20, 30, 60).firstOrNull { minutes / it <= 8 } ?: 120
-            var m = 0
-            while (m * 60 <= total) {
-                val xx = p.left + p.width * (m * 60f / total)
+            // Repères de temps : au plus huit dans la fenêtre visible, en minutes (ou m:ss quand on zoome fort).
+            val startSec = viewStart * profile.intervalSeconds
+            val visibleSec = max(1f, viewSpan * profile.intervalSeconds)
+            val step = listOf(5, 10, 15, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600).firstOrNull { visibleSec / it <= 8 } ?: 7200
+            var tSec = ceil(startSec / step).toInt() * step
+            while (tSec <= startSec + visibleSec + 0.01f) {
+                val xx = p.left + p.width * ((tSec - startSec) / visibleSec)
                 drawLine(gridColor, Offset(xx, p.top), Offset(xx, p.top + p.height), strokeWidth = 1f)
-                val t = measurer.measure("$m", labelStyle)
+                val label = if (step >= 60) "${tSec / 60}" else "${tSec / 60}:${(tSec % 60).toString().padStart(2, '0')}"
+                val t = measurer.measure(label, labelStyle)
                 drawText(t, topLeft = Offset(xx - t.size.width / 2f, p.top + p.height + 3f * density))
-                m += step
+                tSec += step
             }
             val unit = measurer.measure("min", labelStyle)
             drawText(unit, topLeft = Offset(p.left + p.width - unit.size.width, p.top + p.height + 3f * density + unit.size.height))
@@ -182,6 +260,9 @@ internal fun ProfileChart(
                     drawText(t, topLeft = Offset(p.left + p.width + 4f * density, y - t.size.height / 2f))
                     pr += 50.0
                 }
+            }
+            clipRect(p.left, 0f, p.left + p.width, size.height) {
+            if (hasPressure && maxPressure > 0) {
                 val line = Path()
                 profile.pressureBar.forEachIndexed { i, bar ->
                     val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
@@ -204,7 +285,7 @@ internal fun ProfileChart(
 
             // Remontée trop rapide : le tronçon de courbe prend la couleur de la gravité (orange, puis rouge).
             for (i in 1 until n) {
-                val color = ascentColor(rates[i]) ?: continue
+                val color = scale.colorFor(rates[i]) ?: continue
                 drawLine(color, Offset(x(i - 1), yDepth(profile.depthDm[i - 1])), Offset(x(i), yDepth(profile.depthDm[i])), 4f * density, StrokeCap.Round)
             }
 
@@ -214,6 +295,7 @@ internal fun ProfileChart(
                     drawLine(depthColor.copy(alpha = 0.6f), Offset(x(i), p.top), Offset(x(i), p.top + p.height), strokeWidth = 1.5f * density)
                     drawCircle(depthColor, 4f * density, Offset(x(i), yDepth(profile.depthDm[i])))
                 }
+            }
             }
         }
 
@@ -234,10 +316,10 @@ internal fun ProfileChart(
 
         // Bilan de la vitesse de remontée.
         if (maxRate > 0.5) {
-            val color = ascentColor(maxRate) ?: StatusOk
+            val color = scale.colorFor(maxRate) ?: StatusOk
             Text(
                 s.labelled(s.ascentRateLabel, "max ${formatNum(round(maxRate * 10) / 10)} m/min") +
-                    " · " + if (secondsOver > 0) s.ascentOver(ASCENT_RATE_WARN.toInt(), secondsOver) else s.ascentFine,
+                    " · " + if (secondsOver > 0) s.ascentOver(scale.yellowAbove, secondsOver) else s.ascentFine,
                 style = MaterialTheme.typography.bodyMedium,
                 color = color,
                 modifier = Modifier.padding(start = 4.dp),
@@ -283,6 +365,44 @@ internal fun ProfileFullscreen(profile: DiveProfile, actions: PlatformActions, o
                     },
                 ) { content() }
             }
+        }
+    }
+}
+
+/**
+ * Mini-courbe d'une plongée pour la liste : la forme de la plongée (la surface en haut, l'échelle propre à chaque plongée)
+ * avec les remontées trop rapides en orange ou rouge. Pas d'axes ni de gestes.
+ */
+@Composable
+internal fun ProfileSparkline(profile: DiveProfile, modifier: Modifier = Modifier) {
+    val depthColor = MaterialTheme.colorScheme.primary
+    val scale = LocalAscentScale.current
+    val rates = remember(profile) { profile.ascentRates() }
+    val n = profile.depthDm.size
+    Canvas(modifier) {
+        if (n < 2) return@Canvas
+        val maxDepth = max(5.0, (profile.depthDm.maxOrNull() ?: 0) / 10.0).toFloat()
+        val stroke = 1.6f * density
+        // Une centaine de points suffisent à cette taille : on n'en dessine pas des centaines par carte.
+        val step = max(1, ceil(n / 120.0).toInt())
+        val indices = (0 until n step step).toMutableList().also { if (it.last() != n - 1) it += n - 1 }
+        fun x(i: Int) = size.width * i / (n - 1)
+        fun y(i: Int) = (size.height - stroke) * (profile.depthDm[i] / 10f / maxDepth) + stroke / 2
+
+        val line = Path()
+        indices.forEachIndexed { k, i -> if (k == 0) line.moveTo(x(i), y(i)) else line.lineTo(x(i), y(i)) }
+        val area = Path().apply {
+            addPath(line)
+            lineTo(x(n - 1), 0f)
+            lineTo(0f, 0f)
+            close()
+        }
+        drawPath(area, depthColor.copy(alpha = 0.18f))
+        drawPath(line, depthColor, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        for (k in 1 until indices.size) {
+            val i = indices[k]
+            val color = scale.colorFor(rates[i]) ?: continue
+            drawLine(color, Offset(x(indices[k - 1]), y(indices[k - 1])), Offset(x(i), y(i)), stroke * 2f, StrokeCap.Round)
         }
     }
 }

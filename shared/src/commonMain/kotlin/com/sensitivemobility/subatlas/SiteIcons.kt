@@ -34,14 +34,14 @@ internal fun DiveSite.countryText(): String =
 
 /** Ligne « 🇫🇷 France · [pictogramme du type] Nom du site ». */
 @Composable
-internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Modifier) {
+internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Modifier, maxLines: Int = 2) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (site.country.isNotBlank()) Text(site.countryText() + " · ", style = style, maxLines = 1)
         site.type?.let {
             SiteTypeIcon(it, Modifier.size(20.dp))
             Spacer(Modifier.width(4.dp))
         }
-        Text(site.name, style = style, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(site.name, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
     }
 }
 

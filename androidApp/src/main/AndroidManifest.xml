@@ -29,6 +29,20 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="subatlas" android:host="dive" />
             </intent-filter>
+            <!-- Fichier partagé depuis une autre appli (export Shearwater .db) : « Partager > SubAtlas » -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
+            <!-- ... ou « Ouvrir avec » depuis un gestionnaire de fichiers -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

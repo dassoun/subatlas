@@ -47,7 +47,10 @@ internal object ShearwaterImport {
     private const val PSI_TO_BAR = 0.0689476
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun parse(bytes: ByteArray): List<ShearwaterDive> {
+    /** Plongées lues, et nombre de plongées du fichier qu'on n'a pas pu lire. */
+    class ShearwaterFile(val dives: List<ShearwaterDive>, val skipped: Int)
+
+    fun parse(bytes: ByteArray): ShearwaterFile {
         val db = try {
             SqliteFile(bytes)
         } catch (e: IllegalArgumentException) {
@@ -58,11 +61,14 @@ internal object ShearwaterImport {
         val logs = db.rows("log_data").associateBy { it["log_id"].str() }
         val knownSites = db.rows("dive_site").associateBy { it["Name"].str().trim().lowercase() }
 
-        return db.rows("dive_details").mapNotNull { d ->
+        var skipped = 0
+        val dives = db.rows("dive_details").mapNotNull { d ->
             val id = d["DiveId"].str()
-            if (id.isBlank()) return@mapNotNull null
-            runCatching { convert(id, d, logs[id], knownSites) }.getOrNull()
+            val dive = if (id.isBlank()) null else runCatching { convert(id, d, logs[id], knownSites) }.getOrNull()
+            if (dive == null) skipped++
+            dive
         }
+        return ShearwaterFile(dives, skipped)
     }
 
     private fun convert(
@@ -75,13 +81,21 @@ internal object ShearwaterImport {
         if (dateTime.length < 10) return null
         val date = dateTime.substring(0, 10)
         val start = dateTime.takeIf { it.length >= 16 }?.substring(11, 16)
-        val duration = d["DiveLengthTime"].dbl()?.toInt()?.takeIf { it > 0 }
+
+        val format = log?.get("format").str()
+        val blob = log?.get("data_bytes_1") as? ByteArray
+        // Les plongées saisies à la main dans un autre logiciel (puis importées) ont un journal UDDF ; les plongées de
+        // l'ordinateur ont un journal binaire Shearwater « PNF ».
+        val uddf = if (format == "uddf") blob?.let { uddf(it) } else null
+
+        val duration = d["DiveLengthTime"].dbl()?.toInt()?.takeIf { it > 0 } ?: uddf?.durationSeconds?.takeIf { it > 0 }
         val end = duration?.let { timePlusSeconds(start, it) }
 
         val calc = log?.get("calculated_values_from_samples").str().json()
         val tankJson = d["TankProfileData"].str().json()
         val avgDepth = calc?.num("AverageDepth")?.takeIf { it > 0 }
             ?: d["AverageDepth"].dbl()?.takeIf { it > 0 }
+            ?: uddf?.avgDepth
             ?: (tankJson?.get("GasProfiles") as? JsonArray)?.firstOrNull()?.asObject()?.num("AverageDepthInMeters")
         val temp = (calc?.num("AverageTemp")?.takeIf { it > 0 } ?: d["AverageTemp"].dbl()?.takeIf { it > 0 })
             ?.let { round(it * 10) / 10 }
@@ -93,8 +107,9 @@ internal object ShearwaterImport {
         val fileName = d["FileName"].str()
         val serial = d["SerialNumber"].str().ifBlank { fileName.substringAfter('[', "").substringBefore(']') }
         val model = fileName.substringBefore('[').trim()
-        val meta3 = log?.get("data_bytes_3").let { (it as? ByteArray)?.decodeToString() }.orEmpty().json()
+        val meta3 = (log?.get("data_bytes_3") as? ByteArray)?.decodeToString().orEmpty().json()
         val imperial = meta3?.num("UnitSystem")?.toInt() == 1
+        val tanks = tanks(tankJson, d["TankSize"].str())
 
         return ShearwaterDive(
             key = "shearwater:$id",
@@ -107,30 +122,45 @@ internal object ShearwaterImport {
             siteNotes = rest,
             latitude = (known?.get("Latitude") as? Number)?.toDouble()?.takeIf { it != 0.0 },
             longitude = (known?.get("Longitude") as? Number)?.toDouble()?.takeIf { it != 0.0 },
-            maxDepth = d["Depth"].dbl() ?: log?.get("data_bytes_3").let { (it as? ByteArray)?.decodeToString() }.orEmpty().json()?.num("MaxDepth"),
+            maxDepth = (d["Depth"].dbl() ?: meta3?.num("MaxDepth") ?: uddf?.greatestDepth)?.let { round(it * 10) / 10 },
             avgDepth = avgDepth?.let { round(it * 10) / 10 },
             waterTempC = temp,
-            tanks = tanks(tankJson, d["TankSize"].str()),
-            weightKg = d["Weight"].dbl(),
+            tanks = tanks,
+            weightKg = d["Weight"].dbl()?.takeIf { it > 0 },
             suitType = suit(d["Dress"].str()),
             notes = d["Notes"].str().trim(),
             buddy = d["Buddy"].str().trim(),
             visibilityMeters = d["Visibility"].str().filter { it.isDigit() }.toIntOrNull(),
             computer = listOf(model, serial.takeIf { it.isNotBlank() }?.let { "($it)" }.orEmpty()).filter { it.isNotBlank() }.joinToString(" "),
-            profile = (log?.get("data_bytes_1") as? ByteArray)?.let { profile(it, duration, imperial, hasPressure(tankJson)) },
+            profile = when {
+                blob == null -> null
+                format == "uddf" -> uddf?.let { uddfProfile(it) }
+                else -> pnfProfile(blob, duration, imperial, tanks.any { it.pressureStartBar != null })
+            },
         )
     }
 
     // ------------------------------------------------------------------ Bouteilles
 
-    private fun hasPressure(tankJson: JsonObject?): Boolean =
-        (tankJson?.get("TankData") as? JsonArray)?.firstOrNull()?.asObject()?.get("StartPressurePSI").str().toDoubleOrNull() != null
+    /** Les volumes cités dans `TankSize` (« 12L alu », « 15 », « 12 / 12 »), en litres ; les pieds cubes sont ignorés. */
+    private fun volumes(tankSize: String): List<Double> =
+        Regex("(\\d+(?:[.,]\\d+)?)\\s*([a-zA-Z]*)").findAll(tankSize).mapNotNull { m ->
+            val unit = m.groupValues[2].lowercase()
+            val v = m.groupValues[1].replace(',', '.').toDoubleOrNull()
+            if (unit.startsWith("cu") || unit.startsWith("cf") || v == null || v !in 1.0..40.0) null else v
+        }.toList()
 
-    /** Les bouteilles équipées d'un capteur (pressions de début et de fin), avec leur mélange ; le volume vient de `TankSize`. */
+    /**
+     * Les bouteilles équipées d'un capteur allumé, avec leurs pressions (PSI converties en bar) et leur mélange ; le volume
+     * vient de `TankSize`. Les capteurs éteints, à 0 PSI, sont ignorés. Sans capteur, on garde une bouteille avec le mélange.
+     */
     private fun tanks(tankJson: JsonObject?, tankSize: String): List<Tank> {
-        val volumes = Regex("(\\d+(?:[.,]\\d+)?)\\s*[lL]").findAll(tankSize).mapNotNull { it.groupValues[1].replace(',', '.').toDoubleOrNull() }.toList()
+        val volumes = volumes(tankSize)
         val data = (tankJson?.get("TankData") as? JsonArray).orEmpty().mapNotNull { it.asObject() }
-        val used = data.filter { it.get("StartPressurePSI").str().toDoubleOrNull() != null }
+        val used = data.filter {
+            val on = (it["DiveTransmitter"] as? JsonObject)?.get("IsOn").str() == "true"
+            on && (it["StartPressurePSI"].str().toDoubleOrNull() ?: 0.0) > 0
+        }
         fun gas(o: JsonObject?): Pair<Int, Int> {
             val g = o?.get("GasProfile")?.asObject()
             return (g?.num("O2Percent")?.toInt() ?: 21) to (g?.num("HePercent")?.toInt() ?: 0)
@@ -145,8 +175,8 @@ internal object ShearwaterImport {
                 volumeLiters = volumes.getOrNull(i) ?: volumes.firstOrNull(),
                 o2Percent = o2,
                 hePercent = he,
-                pressureStartBar = t.get("StartPressurePSI").str().toDoubleOrNull()?.let { round(it * PSI_TO_BAR).toInt() },
-                pressureEndBar = t.get("EndPressurePSI").str().toDoubleOrNull()?.let { round(it * PSI_TO_BAR).toInt() },
+                pressureStartBar = t["StartPressurePSI"].str().toDoubleOrNull()?.let { round(it * PSI_TO_BAR).toInt() },
+                pressureEndBar = t["EndPressurePSI"].str().toDoubleOrNull()?.let { round(it * PSI_TO_BAR).toInt() },
             )
         }
     }
@@ -157,7 +187,9 @@ internal object ShearwaterImport {
             s.isBlank() -> null
             "semi" in s -> SuitType.SEMI_DRY
             "dry" in s || "étanche" in s || "etanche" in s -> SuitType.DRY
-            else -> SuitType.WET.takeIf { "wet" in s || "shorty" in s || "néopr" in s || "neopr" in s || "humide" in s }
+            else -> SuitType.WET.takeIf {
+                "wet" in s || "shorty" in s || "skin" in s || "néopr" in s || "neopr" in s || "humide" in s
+            }
         }
     }
 
@@ -171,6 +203,78 @@ internal object ShearwaterImport {
         return "" to location
     }
 
+    // ------------------------------------------------------------------ Journal UDDF (plongées saisies dans un autre logiciel)
+
+    /** Décompresse un blob de journal : taille sur 4 octets puis flux gzip (ou gzip seul). */
+    private fun unzip(blob: ByteArray): ByteArray? = try {
+        if (blob.size > 2 && blob[0] == 0x1f.toByte() && blob[1] == 0x8b.toByte()) Inflate.gunzip(blob, 0) else Inflate.gunzip(blob, 4)
+    } catch (e: Inflate.FormatException) {
+        null
+    }
+
+    private class Uddf(
+        /** (temps en s, profondeur en m, température en °C ou null). */
+        val points: List<Triple<Double, Double, Double?>>,
+        val greatestDepth: Double?,
+        val avgDepth: Double?,
+        val durationSeconds: Int?,
+    )
+
+    private fun tag(text: String, name: String): String? =
+        Regex("<$name>\\s*([^<]*?)\\s*</$name>").find(text)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+
+    private fun uddf(blob: ByteArray): Uddf? {
+        val xml = unzip(blob)?.decodeToString() ?: return null
+        val points = Regex("<waypoint>(.*?)</waypoint>", RegexOption.DOT_MATCHES_ALL).findAll(xml).mapNotNull { m ->
+            val w = m.groupValues[1]
+            val depth = tag(w, "depth")?.toDoubleOrNull() ?: return@mapNotNull null
+            val time = tag(w, "divetime")?.toDoubleOrNull() ?: return@mapNotNull null
+            // UDDF exprime les températures en kelvins.
+            val temp = tag(w, "temperature")?.toDoubleOrNull()?.let { if (it > 200) it - 273.15 else it }
+            Triple(time, depth, temp)
+        }.toList()
+        return Uddf(
+            points = points,
+            greatestDepth = tag(xml, "greatestdepth")?.toDoubleOrNull(),
+            avgDepth = tag(xml, "averagedepth")?.toDoubleOrNull(),
+            durationSeconds = tag(xml, "diveduration")?.toDoubleOrNull()?.toInt(),
+        )
+    }
+
+    /**
+     * Les journaux UDDF d'une plongée saisie à la main ne contiennent que quatre points (un trapèze) : on n'en fait pas de
+     * courbe, qui serait fausse. Un vrai profil (plus de douze points) est rééchantillonné à intervalle régulier.
+     */
+    private fun uddfProfile(u: Uddf): DiveProfile? {
+        val pts = u.points.sortedBy { it.first }
+        if (pts.size < 12) return null
+        val total = pts.last().first
+        if (total <= 0) return null
+        val deltas = pts.zipWithNext { a, b -> b.first - a.first }.filter { it > 0 }.sorted()
+        val median = deltas.getOrNull(deltas.size / 2) ?: return null
+        var interval = listOf(1, 2, 3, 4, 5, 10, 15, 20, 30, 60).minByOrNull { abs(it - median) } ?: 10
+        while (total / interval > 1500) interval *= 2 // une plongée très longue : on garde la courbe légère
+        val hasTemp = pts.count { it.third != null } >= pts.size / 2
+
+        fun at(t: Double, value: (Triple<Double, Double, Double?>) -> Double?): Double? {
+            var i = pts.indexOfLast { it.first <= t }
+            if (i < 0) i = 0
+            val a = pts[i]
+            val b = pts.getOrNull(i + 1) ?: return value(a)
+            val va = value(a) ?: return value(b)
+            val vb = value(b) ?: return va
+            return if (b.first == a.first) va else va + (vb - va) * ((t - a.first) / (b.first - a.first))
+        }
+
+        val count = (total / interval).toInt() + 1
+        val times = List(count) { it * interval.toDouble() }
+        return DiveProfile(
+            intervalSeconds = interval,
+            depthDm = times.map { round((at(it) { p -> p.second } ?: 0.0) * 10).toInt() },
+            tempDc = if (hasTemp) times.map { round((at(it) { p -> p.third } ?: 0.0) * 10).toInt() } else emptyList(),
+        )
+    }
+
     // ------------------------------------------------------------------ Profil (format PNF)
 
     /**
@@ -178,12 +282,8 @@ internal object ShearwaterImport {
      * enregistrements de 32 octets ; ceux de type 0x01 sont les échantillons : profondeur (octets 1-2, 1/10 m),
      * température (octet 14) et pression de la bouteille 1 (octets 28-29, en demi-PSI).
      */
-    private fun profile(blob: ByteArray, durationSeconds: Int?, imperial: Boolean, withPressure: Boolean): DiveProfile? {
-        val raw = try {
-            if (blob.size > 2 && blob[0] == 0x1f.toByte() && blob[1] == 0x8b.toByte()) Inflate.gunzip(blob, 0) else Inflate.gunzip(blob, 4)
-        } catch (e: Inflate.FormatException) {
-            return null
-        }
+    private fun pnfProfile(blob: ByteArray, durationSeconds: Int?, imperial: Boolean, withPressure: Boolean): DiveProfile? {
+        val raw = unzip(blob) ?: return null
         val depth = ArrayList<Double>()
         val temp = ArrayList<Double>()
         val pressure = ArrayList<Double>()

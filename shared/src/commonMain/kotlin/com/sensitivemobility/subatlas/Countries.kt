@@ -239,6 +239,10 @@ private val COUNTRY_ALIASES = mapOf(
     "COREE" to "KR", "KOREA" to "KR", "EMIRATS ARABES UNIS" to "AE", "UAE" to "AE", "DUBAI" to "AE",
     "TAHITI" to "PF", "BORA BORA" to "PF", "REUNION" to "RE", "ILE MAURICE" to "MU", "ÎLE MAURICE" to "MU",
     "CAP VERT" to "CV", "SAINT MARTIN" to "MF", "TIMOR-LESTE" to "TL", "SWAZILAND" to "SZ",
+    // Régions et îles souvent saisies à la place du pays.
+    "CORSE" to "FR", "CORSICA" to "FR", "CRETE" to "GR", "CRETA" to "GR", "SARDAIGNE" to "IT", "SARDINIA" to "IT",
+    "SICILE" to "IT", "SICILY" to "IT", "MADERE" to "PT", "MADEIRA" to "PT", "ACORES" to "PT", "AZORES" to "PT",
+    "MAJORQUE" to "ES", "MALLORCA" to "ES", "CANARIES" to "ES", "TENERIFE" to "ES", "IBIZA" to "ES",
 )
 
 private class CountryEntry(val code: String, val fr: String, val en: String)

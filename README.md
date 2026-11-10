@@ -64,6 +64,23 @@ capteur de la bouteille 1 alimente la courbe de pression ; les exports en unité
   pivoté d'un quart de tour et on tourne le téléphone soi-même. L'activité Android déclare `configChanges` pour que la
   rotation ne la recrée pas (sinon l'appli retomberait sur l'écran d'accueil).
 - La vitesse de remontée est calculée à partir du profil, lissée sur environ 30 s (`DiveProfile.ascentRates`). Les tronçons de
-  courbe passent en orange au-delà de 9 m/min et en rouge au-delà de 12 m/min (`ASCENT_RATE_WARN` et `ASCENT_RATE_DANGER`
-  dans `Models.kt`, des repères de l'appli et non ceux d'un fabricant). Un bilan sous la courbe donne la vitesse max et le
-  temps passé au-dessus de 9 m/min ; la lecture au toucher indique la vitesse du point touché.
+  courbe passent en jaune au-delà de 10 m/min, en orange au-delà de 15 et en rouge au-delà de 20 par défaut ; seuils et couleurs se règlent dans les réglages (`AscentScale`, dans `Settings.kt` ; ce sont des repères de l'appli et non ceux d'un fabricant). Un bilan sous la courbe donne la vitesse max et le
+  temps passé au-dessus de 10 m/min ; la lecture au toucher indique la vitesse du point touché.
+
+## Recevoir un export Shearwater depuis une autre appli (Android)
+SubAtlas apparaît dans le menu « Partager » (et « Ouvrir avec ») pour les fichiers de type `application/*`, dont l'export
+`.db` de Shearwater : depuis l'appli Shearwater (Profil > Options > Exporter), « Partager > Sub Atlas » ouvre directement
+l'aperçu d'import, sans passer par un e-mail. Voir `MainActivity.handleIntent` et `IncomingFile`.
+Si SubAtlas n'apparaît pas (type de fichier inhabituel), enregistrer le fichier dans « Téléchargements » puis utiliser
+« Importer depuis Shearwater » dans l'écran Plongées.
+
+## Fichiers Shearwater contenant beaucoup de plongées
+Un export complet (des centaines de plongées) mélange deux formats de journal (`log_data.format`) :
+- `sw-pnf` : plongées enregistrées par l'ordinateur (profil binaire PNF) ;
+- `uddf` : plongées saisies dans un autre logiciel puis importées dans Shearwater Cloud. Un vrai profil UDDF
+  (plus de douze points) est rééchantillonné à intervalle régulier ; une simple saisie manuelle (quatre points, un
+  trapèze) n'a pas de courbe, car elle serait fausse. La durée vient alors de `diveduration`.
+
+Autres points : les capteurs de pression éteints (0 PSI) ne créent pas de bouteille, une taille de bouteille sans unité
+(« 12 ») est lue en litres, un lestage de 0 est ignoré, et la lecture du fichier se fait hors du fil principal avec un
+message d'attente (quelques secondes pour 200 plongées sur l'émulateur).

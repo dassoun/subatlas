@@ -20,6 +20,11 @@ interface Strings {
     val ok: String
     val cancel: String
     val delete: String
+    val mergePrevious: String
+    val noMerge: String
+    val mergeAction: String
+    val mergeTitle: String
+    fun mergeMessage(earlier: String, later: String): String
     val edit: String
     val save: String
     val rename: String
@@ -55,6 +60,7 @@ interface Strings {
     val titleField: String
     val addItem: String
     val resetAll: String
+    val editItem: String
     val deleteChecklist: String
     val newItem: String
     val textField: String
@@ -127,6 +133,9 @@ interface Strings {
     val shearwaterNewTag: String
     val shearwaterMergeTag: String
     val shearwaterMergeHelp: String
+    fun shearwaterMore(count: Int): String
+    fun shearwaterSkipped(count: Int): String
+    val shearwaterReading: String
     val computerLabel: String
     val profileTitle: String
     val profileDepthLegend: String
@@ -212,6 +221,14 @@ interface Strings {
     val themeLight: String
     val themeDark: String
     val languageSection: String
+    val kindColorsSection: String
+    val kindColorsHint: String
+    val colorNone: String
+    val ascentSection: String
+    val ascentHint: String
+    fun ascentLevel(i: Int): String
+    fun ascentLimit(v: Int): String
+    val ascentReset: String
     val languageSystem: String
     val dataSection: String
     val dataHint: String
@@ -244,6 +261,12 @@ object FrStrings : Strings {
     override val ok = "OK"
     override val cancel = "Annuler"
     override val delete = "Supprimer"
+    override val mergePrevious = "Fusionner avec la précédente"
+    override val noMerge = "Ne pas fusionner"
+    override val mergeAction = "Fusionner"
+    override val mergeTitle = "Fusionner les plongées ?"
+    override fun mergeMessage(earlier: String, later: String) =
+        "La plongée du $later sera fusionnée dans celle du $earlier : une seule plongée, du début de la première à la fin de la seconde, avec les deux courbes mises bout à bout. La plongée du $later disparaîtra. Cette action est irréversible."
     override val edit = "Modifier"
     override val save = "Enregistrer"
     override val rename = "Renommer"
@@ -279,7 +302,8 @@ object FrStrings : Strings {
     override val newChecklist = "Nouvelle check-list"
     override val titleField = "Titre"
     override val addItem = "Ajouter un élément"
-    override val resetAll = "Tout remettre à zéro"
+    override val resetAll = "Réinitialiser"
+    override val editItem = "Modifier l'élément"
     override val deleteChecklist = "Supprimer la check-list"
     override val newItem = "Nouvel élément"
     override val textField = "Texte"
@@ -290,6 +314,7 @@ object FrStrings : Strings {
     override val defaultChecklists = listOf(
         "Équipement plongée (voyage)" to listOf(
             "Combinaison", "Palmes", "Masque", "Tuba", "Gilet stabilisateur", "Détendeur", "Ordinateur", "Parachute", "Phare", "Ardoise",
+            "Cintre", "Chaussons", "Poncho", "Tongs", "Shaker",
         ),
         "Briefing et sécurité" to listOf(
             "Plan de plongée (profondeur, durée, palier)",
@@ -389,6 +414,9 @@ object FrStrings : Strings {
     override val shearwaterMergeTag = "fusion"
     override val shearwaterMergeHelp =
         "Une plongée du carnet à la même date et à moins d'une heure est complétée avec les données de l'ordinateur et reçoit la courbe ; rien de ce que vous avez saisi n'est écrasé."
+    override fun shearwaterMore(count: Int) = "… et $count autres plongées"
+    override fun shearwaterSkipped(count: Int) = "$count plongée${if (count > 1) "s" else ""} du fichier illisible${if (count > 1) "s" else ""}, ignorée${if (count > 1) "s" else ""}."
+    override val shearwaterReading = "Lecture du fichier…"
     override val computerLabel = "Ordinateur"
     override val profileTitle = "Profil de plongée"
     override val profileDepthLegend = "Profondeur (m)"
@@ -479,6 +507,14 @@ object FrStrings : Strings {
     override val themeLight = "Clair"
     override val themeDark = "Sombre"
     override val languageSection = "Langue"
+    override val kindColorsSection = "Couleurs des plongées"
+    override val kindColorsHint = "Couleur de fond des cartes de la liste, selon le type de plongée."
+    override val colorNone = "Aucune"
+    override val ascentSection = "Vitesse de remontée"
+    override val ascentHint = "La courbe change de couleur quand la vitesse de remontée dépasse chaque seuil."
+    override fun ascentLevel(i: Int) = "Seuil $i"
+    override fun ascentLimit(v: Int) = "au-delà de $v m/min"
+    override val ascentReset = "Valeurs par défaut"
     override val languageSystem = "Système"
     override val dataSection = "Données"
     override val dataHint = "Enregistrez vos plongées, sites et check-lists dans un fichier, ou restaurez-les depuis une sauvegarde."
@@ -524,6 +560,12 @@ object EnStrings : Strings {
     override val ok = "OK"
     override val cancel = "Cancel"
     override val delete = "Delete"
+    override val mergePrevious = "Merge with previous"
+    override val noMerge = "Do not merge"
+    override val mergeAction = "Merge"
+    override val mergeTitle = "Merge the dives?"
+    override fun mergeMessage(earlier: String, later: String) =
+        "The dive of $later will be merged into the one of $earlier: a single dive, from the start of the first to the end of the second, with both profiles joined. The dive of $later will disappear. This cannot be undone."
     override val edit = "Edit"
     override val save = "Save"
     override val rename = "Rename"
@@ -559,7 +601,8 @@ object EnStrings : Strings {
     override val newChecklist = "New checklist"
     override val titleField = "Title"
     override val addItem = "Add an item"
-    override val resetAll = "Reset everything"
+    override val resetAll = "Reset all"
+    override val editItem = "Edit item"
     override val deleteChecklist = "Delete checklist"
     override val newItem = "New item"
     override val textField = "Text"
@@ -570,6 +613,7 @@ object EnStrings : Strings {
     override val defaultChecklists = listOf(
         "Dive gear (travel)" to listOf(
             "Wetsuit", "Fins", "Mask", "Snorkel", "BCD", "Regulator", "Dive computer", "Surface marker buoy", "Dive light", "Slate",
+            "Hanger", "Booties", "Poncho", "Flip-flops", "Shaker",
         ),
         "Briefing and safety" to listOf(
             "Dive plan (depth, duration, safety stop)",
@@ -668,6 +712,9 @@ object EnStrings : Strings {
     override val shearwaterMergeTag = "merge"
     override val shearwaterMergeHelp =
         "A logbook dive on the same date and within one hour is completed with the computer's data and gets the profile; nothing you typed is overwritten."
+    override fun shearwaterMore(count: Int) = "… and $count more dives"
+    override fun shearwaterSkipped(count: Int) = "$count unreadable dive${if (count != 1) "s" else ""} in the file skipped."
+    override val shearwaterReading = "Reading the file…"
     override val computerLabel = "Dive computer"
     override val profileTitle = "Dive profile"
     override val profileDepthLegend = "Depth (m)"
@@ -758,6 +805,14 @@ object EnStrings : Strings {
     override val themeLight = "Light"
     override val themeDark = "Dark"
     override val languageSection = "Language"
+    override val kindColorsSection = "Dive colours"
+    override val kindColorsHint = "Background colour of the cards in the dive list, by dive type."
+    override val colorNone = "None"
+    override val ascentSection = "Ascent rate"
+    override val ascentHint = "The curve changes colour when the ascent rate goes above each threshold."
+    override fun ascentLevel(i: Int) = "Threshold $i"
+    override fun ascentLimit(v: Int) = "above $v m/min"
+    override val ascentReset = "Reset to defaults"
     override val languageSystem = "System"
     override val dataSection = "Data"
     override val dataHint = "Save your dives, sites and checklists to a file, or restore them from a backup."

@@ -185,11 +185,6 @@ data class DiveProfile(
     }
 }
 
-/** Au-delà de cette vitesse de remontée (m/min), la remontée est jugée un peu rapide (repère courant : 9 m/min). */
-internal const val ASCENT_RATE_WARN = 9.0
-
-/** Au-delà, la remontée est jugée trop rapide. */
-internal const val ASCENT_RATE_DANGER = 12.0
 
 /** Une plongée réalisée sur un site. `date` : `yyyy-MM-dd` ; heures : `HH:mm`. */
 @Serializable
@@ -227,6 +222,8 @@ data class Dive(
     val computer: String = "",
     /** Identifiant de la plongée dans la source importée : évite les doublons si on réimporte le même fichier. */
     val importKey: String = "",
+    /** L'utilisateur a refusé la fusion avec la plongée précédente : la liste ne la propose plus. */
+    val noMerge: Boolean = false,
     /** Courbe de la plongée (profondeur, température, pression), si elle a été importée. */
     val profile: DiveProfile? = null,
 ) {

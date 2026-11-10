@@ -3,6 +3,7 @@ package com.sensitivemobility.subatlas
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -63,14 +64,36 @@ class MainActivity : ComponentActivity() {
         setContent { App(storage, location, actions, contacts) }
     }
 
-    // Lien de plongée partagée (subatlas://dive?d=…) : transmis à l'écran principal.
+    // Lien de plongée partagée (subatlas://dive?d=…) ou fichier reçu d'une autre appli : transmis à l'écran principal.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
     }
 
     private fun handleIntent(intent: Intent?) {
-        val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data?.toString() ?: return
-        IncomingLink.pending = link
+        intent ?: return
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val data = intent.data ?: return
+                if (data.scheme == "subatlas") IncomingLink.pending = data.toString() else readIncomingFile(data)
+            }
+            Intent.ACTION_SEND -> {
+                val uri = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+                if (uri != null) readIncomingFile(uri)
+            }
+        }
+    }
+
+    /** Lit le fichier reçu hors du fil principal, puis le transmet à l'écran principal (qui le reconnaît ou le refuse). */
+    private fun readIncomingFile(uri: Uri) {
+        Thread {
+            val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes != null) runOnUiThread { IncomingFile.pending = bytes }
+        }.start()
     }
 }
