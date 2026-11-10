@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -129,6 +130,11 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val state = remember { AppState(storage, systemLanguage) }
     val strings = stringsFor(state.settings.language, systemLanguage)
     val stack = remember { mutableStateListOf<Screen>(Screen.Dives) }
+    // Position de défilement de chaque liste, conservée quand on ouvre une fiche puis qu'on revient.
+    val divesListState = rememberLazyListState()
+    val sitesListState = rememberLazyListState()
+    val centersListState = rememberLazyListState()
+    val checklistsListState = rememberLazyListState()
     val current = stack.last()
 
     fun push(s: Screen) { stack.add(s) }
@@ -278,12 +284,13 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             onAdd = { push(Screen.DiveForm(null, null)) },
                             onShared = { sharedIncoming = it },
                             actions = actions,
+                            listState = divesListState,
                         )
                     Screen.Sites ->
-                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) })
+                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, listState = sitesListState)
                     Screen.Centers ->
-                        CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) })
-                    Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) })
+                        CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
+                    Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
                     Screen.Safety -> SafetyList(pad, actions, onOpen = { push(Screen.SafetyDetail(it)) })
                     else -> SettingsScreen(state, pad, onExport = ::startExport, onImport = ::startImport)
                 }
@@ -583,7 +590,7 @@ private fun BackArrow(onClick: () -> Unit) {
 // ---------------------------------------------------------------- Sites
 
 @Composable
-private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit) {
+private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, listState: LazyListState) {
     val s = LocalStrings.current
     Column(Modifier.fillMaxSize().padding(pad)) {
         if (state.sites.isEmpty()) {
@@ -594,6 +601,7 @@ private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit
         }
         LazyColumn(
             Modifier.weight(1f),
+            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -780,12 +788,13 @@ private fun Checklist.statusText(s: Strings): String = when (status) {
 }
 
 @Composable
-private fun ChecklistList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit) {
+private fun ChecklistList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, listState: LazyListState) {
     val s = LocalStrings.current
     var adding by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(pad)) {
         LazyColumn(
             Modifier.weight(1f),
+            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

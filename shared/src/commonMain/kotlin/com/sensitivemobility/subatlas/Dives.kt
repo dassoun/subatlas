@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -148,6 +149,7 @@ internal fun DiveList(
     onAdd: () -> Unit,
     onShared: (SharedDive) -> Unit,
     actions: PlatformActions,
+    listState: LazyListState,
 ) {
     val s = LocalStrings.current
     var pasting by remember { mutableStateOf(false) }
@@ -213,6 +215,7 @@ internal fun DiveList(
         }
         LazyColumn(
             Modifier.weight(1f),
+            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
