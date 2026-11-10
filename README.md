@@ -57,3 +57,13 @@ La courbe s'affiche dans la fiche de la plongée (un appui ou un glissement donn
 
 Limites connues : la sélection du fichier n'est pas encore implémentée sur iOS (comme l'export des données) ; seul le
 capteur de la bouteille 1 alimente la courbe de pression ; les exports en unités impériales n'ont pas été testés.
+
+## Courbe de plongée : plein écran et vitesse de remontée
+- Le bouton en haut à droite du profil l'affiche en plein écran, en paysage. Sur Android l'écran est verrouillé en paysage le
+  temps de l'affichage (`PlatformActions.setLandscape`) ; sur iPhone, où ce verrouillage n'est pas encore écrit, le contenu est
+  pivoté d'un quart de tour et on tourne le téléphone soi-même. L'activité Android déclare `configChanges` pour que la
+  rotation ne la recrée pas (sinon l'appli retomberait sur l'écran d'accueil).
+- La vitesse de remontée est calculée à partir du profil, lissée sur environ 30 s (`DiveProfile.ascentRates`). Les tronçons de
+  courbe passent en orange au-delà de 9 m/min et en rouge au-delà de 12 m/min (`ASCENT_RATE_WARN` et `ASCENT_RATE_DANGER`
+  dans `Models.kt`, des repères de l'appli et non ceux d'un fabricant). Un bilan sous la courbe donne la vitesse max et le
+  temps passé au-dessus de 9 m/min ; la lecture au toucher indique la vitesse du point touché.

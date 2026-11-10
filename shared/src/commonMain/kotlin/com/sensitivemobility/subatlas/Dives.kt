@@ -359,6 +359,7 @@ internal fun DiveDetailView(
     val s = LocalStrings.current
     var confirm by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
     val site = state.site(dive.siteId)
     val recipients = dive.shareRecipients
     val canShare = site != null && recipients.isNotEmpty()
@@ -380,7 +381,7 @@ internal fun DiveDetailView(
         dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
         dive.maxDepth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
         dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
-        dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth()) }
+        dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth(), onFullscreen = { fullscreen = true }) }
 
         dive.tanks.forEachIndexed { i, tank ->
             Card(
@@ -441,6 +442,7 @@ internal fun DiveDetailView(
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
     }
     if (sharing && site != null) ShareDiveDialog(dive, site, actions, recipients) { sharing = false }
+    dive.profile?.let { if (fullscreen) ProfileFullscreen(it, actions) { fullscreen = false } }
     if (confirm) {
         ConfirmDialog(
             s.confirmDeleteDive(site?.name ?: "?", s.dateText(dive.date)),

@@ -169,7 +169,27 @@ data class DiveProfile(
     val pressureBar: List<Int> = emptyList(),
 ) {
     val durationSeconds: Int get() = (depthDm.size - 1).coerceAtLeast(0) * intervalSeconds
+
+    /**
+     * Vitesse de remontée en m/min (positive en remontant, négative en descendant), un point par échantillon. Elle est
+     * lissée sur environ 30 s : sur 5 s, le clapot suffit à faire osciller la profondeur de plusieurs mètres par minute.
+     */
+    fun ascentRates(): List<Double> {
+        val n = depthDm.size
+        if (n < 2 || intervalSeconds <= 0) return List(n) { 0.0 }
+        val k = (30 / intervalSeconds).coerceIn(1, 12)
+        return List(n) { i ->
+            val j = maxOf(0, i - k)
+            if (i == j) 0.0 else (depthDm[j] - depthDm[i]) / 10.0 / ((i - j) * intervalSeconds / 60.0)
+        }
+    }
 }
+
+/** Au-delà de cette vitesse de remontée (m/min), la remontée est jugée un peu rapide (repère courant : 9 m/min). */
+internal const val ASCENT_RATE_WARN = 9.0
+
+/** Au-delà, la remontée est jugée trop rapide. */
+internal const val ASCENT_RATE_DANGER = 12.0
 
 /** Une plongée réalisée sur un site. `date` : `yyyy-MM-dd` ; heures : `HH:mm`. */
 @Serializable

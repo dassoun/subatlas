@@ -34,6 +34,12 @@ interface ContactsProvider {
 interface PlatformActions {
     fun openMap(latitude: Double, longitude: Double, label: String)
 
+    /**
+     * Verrouille l'écran en mode paysage (`true`) ou le libère (`false`). Renvoie `false` si la plateforme ne sait pas le
+     * faire : l'appli fait alors pivoter elle-même le contenu qui doit s'afficher en paysage.
+     */
+    fun setLandscape(landscape: Boolean): Boolean
+
     /** Ouvre la feuille de partage du système avec ce texte. */
     fun shareText(text: String)
 

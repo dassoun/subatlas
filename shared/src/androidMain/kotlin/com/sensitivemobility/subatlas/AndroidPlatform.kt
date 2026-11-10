@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -75,6 +76,13 @@ class AndroidPlatformActions(
             val input = context.contentResolver.openInputStream(uri) ?: error("impossible de lire le fichier")
             input.use { it.readBytes() }
         }
+    }
+
+    override fun setLandscape(landscape: Boolean): Boolean {
+        val activity = context as? android.app.Activity ?: return false
+        activity.requestedOrientation =
+            if (landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        return true
     }
 
     override fun openMap(latitude: Double, longitude: Double, label: String) {

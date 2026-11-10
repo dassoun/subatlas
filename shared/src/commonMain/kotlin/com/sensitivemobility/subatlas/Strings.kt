@@ -131,6 +131,9 @@ interface Strings {
     val profileTitle: String
     val profileDepthLegend: String
     val profilePressureLegend: String
+    val ascentRateLabel: String
+    fun ascentOver(limit: Int, seconds: Int): String
+    val ascentFine: String
     fun shareWithCheckbox(name: String): String
     val shareTitle: String
     fun shareIntro(name: String): String
@@ -390,6 +393,9 @@ object FrStrings : Strings {
     override val profileTitle = "Profil de plongée"
     override val profileDepthLegend = "Profondeur (m)"
     override val profilePressureLegend = "Pression (bar)"
+    override val ascentRateLabel = "Vitesse de remontée"
+    override fun ascentOver(limit: Int, seconds: Int) = "au-dessus de $limit m/min pendant ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
+    override val ascentFine = "toujours sous la limite"
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
     override fun shareIntro(name: String) =
@@ -666,6 +672,9 @@ object EnStrings : Strings {
     override val profileTitle = "Dive profile"
     override val profileDepthLegend = "Depth (m)"
     override val profilePressureLegend = "Pressure (bar)"
+    override val ascentRateLabel = "Ascent rate"
+    override fun ascentOver(limit: Int, seconds: Int) = "above $limit m/min for ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
+    override val ascentFine = "always under the limit"
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
     override fun shareIntro(name: String) =

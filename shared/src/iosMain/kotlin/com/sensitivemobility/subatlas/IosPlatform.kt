@@ -85,6 +85,9 @@ class IosPlatformActions : PlatformActions {
     override suspend fun openFileBytes(): ByteArray? =
         throw UnsupportedOperationException("pas encore disponible sur iOS")
 
+    // Pas de verrouillage d'orientation sur iOS pour l'instant : le contenu est pivoté par l'appli.
+    override fun setLandscape(landscape: Boolean): Boolean = false
+
     override fun openMap(latitude: Double, longitude: Double, label: String) {
         val url = NSURL.URLWithString("http://maps.apple.com/?ll=$latitude,$longitude&q=${label.replace(" ", "%20")}")
             ?: return
