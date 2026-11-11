@@ -7,7 +7,11 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,6 +60,10 @@ import kotlin.math.round
 import kotlin.math.roundToInt
 
 private val PressureColor = Color(0xFF8E7CC3)
+private val NdlColor = Color(0xFF2BB673)
+private val DecoColor = Color(0xFFE5484D)
+private val CnsColor = Color(0xFFF2A33A)
+private val Ppo2Color = Color(0xFFD16BA5)
 
 /**
  * Courbe d'une plongée : profondeur en fonction du temps (la surface en haut), pression de la bouteille s'il y avait un
@@ -87,6 +95,18 @@ internal fun ProfileChart(
     val scale = LocalAscentScale.current
     val secondsOver = rates.count { it > scale.yellowAbove } * profile.intervalSeconds
     val hasPressure = profile.pressureBar.size == n && profile.pressureBar.any { it > 0 }
+    val prefs = LocalChartPrefs.current
+    val showPressure = hasPressure && ChartSeries.PRESSURE in prefs.shown
+    val hasNdl = profile.ndlMin.size == n
+    val hasDeco = profile.decoStopM.size == n && profile.decoStopM.any { it > 0 }
+    val hasCns = profile.cnsPct.size == n
+    val hasPpo2 = profile.ppo2Cb.size == n
+    val showNdl = hasNdl && ChartSeries.NDL in prefs.shown
+    val showDeco = hasDeco && ChartSeries.DECO in prefs.shown
+    val showCns = hasCns && ChartSeries.CNS in prefs.shown
+    val showPpo2 = hasPpo2 && ChartSeries.PPO2 in prefs.shown
+    val cnsMax = if (hasCns) max(5.0, ceil((profile.cnsPct.maxOrNull() ?: 0) / 5.0) * 5.0) else 5.0
+    val ppo2Max = if (hasPpo2) max(160, ceil((profile.ppo2Cb.maxOrNull() ?: 0) / 20.0).toInt() * 20) / 100.0 else 1.6
     val maxDepth = max(5.0, ceil((profile.depthDm.maxOrNull() ?: 0) / 10.0 / 5.0) * 5.0)
     val maxPressure = if (hasPressure) ceil((profile.pressureBar.maxOrNull() ?: 0) / 50.0) * 50.0 else 0.0
     val total = max(1, profile.durationSeconds)
@@ -97,7 +117,7 @@ internal fun ProfileChart(
     fun plot(density: Float, w: Float, h: Float) = Plot(
         left = 34f * density,
         top = 8f * density,
-        width = w - 34f * density - (if (hasPressure) 38f else 10f) * density,
+        width = w - 34f * density - (if (showPressure) 38f else 10f) * density,
         height = h - 8f * density - 22f * density,
     )
 
@@ -171,9 +191,27 @@ internal fun ProfileChart(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Légende : la profondeur, puis une pastille par courbe disponible, qu'on active ou retire d'un appui.
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text("● " + s.profileDepthLegend, style = MaterialTheme.typography.labelSmall, color = depthColor)
-            if (hasPressure) Text("● " + s.profilePressureLegend, style = MaterialTheme.typography.labelSmall, color = PressureColor)
+            @Composable
+            fun seriesChip(series: ChartSeries, color: Color, label: String) {
+                FilterChip(
+                    selected = series in prefs.shown,
+                    onClick = { prefs.toggle(series) },
+                    label = { Text("● $label", style = MaterialTheme.typography.labelSmall, color = color) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = color.copy(alpha = 0.22f)),
+                )
+            }
+            if (hasPressure) seriesChip(ChartSeries.PRESSURE, PressureColor, s.profilePressureLegend)
+            if (hasNdl) seriesChip(ChartSeries.NDL, NdlColor, "${s.seriesNdl} (0–99 min)")
+            if (hasDeco) seriesChip(ChartSeries.DECO, DecoColor, "${s.seriesDeco} (m)")
+            if (hasCns) seriesChip(ChartSeries.CNS, CnsColor, "${s.seriesCns} (0–${cnsMax.roundToInt()} %)")
+            if (hasPpo2) seriesChip(ChartSeries.PPO2, Ppo2Color, "${s.seriesPpo2} (0–${formatNum(ppo2Max)} bar)")
         }
         Canvas(
             (if (fullscreen) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().height(210.dp))
@@ -254,7 +292,7 @@ internal fun ProfileChart(
             drawText(unit, topLeft = Offset(p.left + p.width - unit.size.width, p.top + p.height + 3f * density + unit.size.height))
 
             // Pression : axe à droite.
-            if (hasPressure && maxPressure > 0) {
+            if (showPressure && maxPressure > 0) {
                 var pr = 0.0
                 while (pr <= maxPressure + 0.01) {
                     val y = p.top + p.height * (1f - (pr / maxPressure).toFloat())
@@ -264,7 +302,18 @@ internal fun ProfileChart(
                 }
             }
             clipRect(p.left, 0f, p.left + p.width, size.height) {
-            if (hasPressure && maxPressure > 0) {
+            // Courbes à échelle propre (LND, CNS, PPO2), tracées seulement pendant la plongée.
+            fun inDive(i: Int) = profile.depthDm[i] >= 3 && profile.depthDm[i - 1] >= 3
+            fun seriesLine(values: List<Int>, color: Color, y: (Int) -> Float) {
+                for (i in 1 until n) {
+                    if (!inDive(i)) continue
+                    drawLine(color, Offset(x(i - 1), y(values[i - 1])), Offset(x(i), y(values[i])), 2f * density, StrokeCap.Round)
+                }
+            }
+            if (showNdl) seriesLine(profile.ndlMin, NdlColor) { p.top + p.height * (1f - it.coerceIn(0, 99) / 99f) }
+            if (showCns) seriesLine(profile.cnsPct, CnsColor) { p.top + p.height * (1f - (it / cnsMax).toFloat().coerceIn(0f, 1f)) }
+            if (showPpo2) seriesLine(profile.ppo2Cb, Ppo2Color) { p.top + p.height * (1f - (it / 100.0 / ppo2Max).toFloat().coerceIn(0f, 1f)) }
+            if (showPressure && maxPressure > 0) {
                 val line = Path()
                 profile.pressureBar.forEachIndexed { i, bar ->
                     val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
@@ -284,6 +333,16 @@ internal fun ProfileChart(
             }
             drawPath(area, depthColor.copy(alpha = 0.18f))
             drawPath(line, depthColor, style = Stroke(width = 2.5f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+            // Plafond de décompression : trait rouge à la profondeur du premier palier, sur l'échelle des profondeurs.
+            if (showDeco) {
+                for (i in 1 until n) {
+                    val a = profile.decoStopM[i - 1]
+                    val b = profile.decoStopM[i]
+                    if (a <= 0 && b <= 0) continue
+                    drawLine(DecoColor, Offset(x(i - 1), yDepth(maxOf(a, 0) * 10)), Offset(x(i), yDepth(maxOf(b, 0) * 10)), 3f * density, StrokeCap.Round)
+                }
+            }
 
             // Remontée trop rapide : le tronçon de courbe prend la couleur de la gravité (orange, puis rouge).
             for (i in 1 until n) {
@@ -311,6 +370,11 @@ internal fun ProfileChart(
                 "${formatNum(profile.depthDm[i] / 10.0)} m",
                 profile.tempDc.getOrNull(i)?.let { "${formatNum(it / 10.0)} °C" },
                 if (hasPressure) "${profile.pressureBar[i]} bar" else null,
+                if (showNdl && profile.depthDm[i] >= 3) "${s.seriesNdl} ${profile.ndlMin[i].let { if (it >= 99) "99+" else "$it" }} min" else null,
+                if (showDeco && profile.decoStopM[i] > 0) "${s.seriesDeco} ${profile.decoStopM[i]} m" +
+                    (profile.ttsMin.getOrNull(i)?.let { " (${s.seriesTts} $it min)" } ?: "") else null,
+                if (showCns) "${s.seriesCns} ${profile.cnsPct[i]} %" else null,
+                if (showPpo2) "${s.seriesPpo2} ${formatNum(profile.ppo2Cb[i] / 100.0)} bar" else null,
                 if (abs(rate) >= 0.5) "${if (rate > 0) "↑" else "↓"} ${formatNum(round(abs(rate) * 10) / 10)} m/min" else null,
             )
             Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 4.dp))

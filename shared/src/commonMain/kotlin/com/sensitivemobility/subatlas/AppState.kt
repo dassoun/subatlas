@@ -19,7 +19,22 @@ internal val diveOrder: Comparator<Dive> =
     compareByDescending<Dive> { it.date }.thenByDescending { it.startTime.orEmpty() }.thenByDescending { it.id }
 
 /** Une plongée d'un export Shearwater et la plongée du carnet avec laquelle elle sera fusionnée (`null` : nouvelle). */
-internal class ShearwaterPlanItem(val dive: ShearwaterDive, val mergeInto: Dive?)
+internal class ShearwaterPlanItem(val dive: ShearwaterDive, val mergeInto: Dive?) {
+    /**
+     * Plongée déjà créée ou fusionnée à partir de cet export, et inchangée dans Shearwater depuis (même date de dernière
+     * modification que celle mémorisée à l'import) : rien à refaire. Une plongée importée avant que la date soit mémorisée
+     * est aussi considérée à jour si elle est déjà fusionnée ou a déjà les courbes LND / déco / CNS / PPO2.
+     */
+    val alreadyDone: Boolean
+        get() {
+            val d = mergeInto ?: return false
+            if (dive.key !in d.importKeys()) return false
+            val seen = d.importModified[dive.key]
+            if (seen != null && dive.modified.isNotEmpty()) return seen == dive.modified
+            if (d.importKeys().size > 1) return true
+            return dive.profile?.ndlMin.isNullOrEmpty() || d.profile?.ndlMin?.isNotEmpty() == true
+        }
+}
 
 class AppState(private val storage: Storage, private val systemLanguage: String) {
     // coerceInputValues : une valeur d'énumération devenue inconnue retombe sur la valeur par défaut (anciens réglages).
@@ -135,12 +150,22 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
      */
     internal fun planShearwaterImport(list: List<ShearwaterDive>): List<ShearwaterPlanItem> {
         val taken = HashSet<Long>()
-        return list.sortedByDescending { it.date + " " + it.startTime.orEmpty() }.map { sw ->
+        var stamped = false
+        val plan = list.sortedByDescending { it.date + " " + it.startTime.orEmpty() }.map { sw ->
             // Une plongée issue d'une fusion porte plusieurs clés : chacune la retrouve, sans en refaire une nouvelle.
             val match = dives.firstOrNull { sw.key in it.importKeys() } ?: closestByTime(sw, taken)
             if (match != null) taken += match.id
-            ShearwaterPlanItem(sw, match)
+            val item = ShearwaterPlanItem(sw, match)
+            // Plongée importée avant la mémorisation des dates et déjà à jour : on mémorise la date de l'export, pour
+            // repérer plus tard une modification faite dans Shearwater.
+            if (match != null && item.alreadyDone && sw.modified.isNotEmpty() && match.importModified[sw.key] == null) {
+                saveDive(match.copy(importModified = match.importModified + (sw.key to sw.modified)), persist = false)
+                stamped = true
+            }
+            item
         }
+        if (stamped) saveDives()
+        return plan
     }
 
     private fun closestByTime(sw: ShearwaterDive, taken: Set<Long>): Dive? {
@@ -163,9 +188,11 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         var created = 0
         var merged = 0
         for (item in plan) {
+            if (item.alreadyDone) continue
             val existing = item.mergeInto?.let { dive(it.id) ?: it }
             if (existing != null) {
-                saveDive(mergeShearwater(existing, item.dive), persist = false)
+                val result = mergeShearwater(existing, item.dive)
+                saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
                 merged++
             } else {
                 saveDive(newDiveFrom(item.dive), persist = false)
@@ -208,6 +235,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         notes = sw.notes,
         computer = sw.computer,
         importKey = sw.key,
+        importModified = mapOf(sw.key to sw.modified),
         profile = sw.profile,
     )
 
@@ -255,17 +283,29 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
      * Crée la plongée reçue dans le carnet. Le site est retrouvé par son nom (et son pays) ou par sa proximité (300 m) ;
      * sinon il est créé. Renvoie l'identifiant de la nouvelle plongée.
      */
-    fun addSharedDive(shared: SharedDive): Long {
-        val lat = shared.site.lat
-        val lon = shared.site.lon
-        val site = sites.firstOrNull {
-            it.name.equals(shared.site.name, ignoreCase = true) && it.country.equals(shared.site.country, ignoreCase = true)
+    /** Le site du carnet qui correspond au site reçu (même nom et pays, ou à moins de 300 m) ; il est créé s'il n'existe pas. */
+    private fun siteFor(shared: SharedSite): DiveSite {
+        val lat = shared.lat
+        val lon = shared.lon
+        return sites.firstOrNull {
+            it.name.equals(shared.name, ignoreCase = true) && it.country.equals(shared.country, ignoreCase = true)
         } ?: sites.firstOrNull {
             val la = it.latitude
             val lo = it.longitude
             lat != null && lon != null && la != null && lo != null && distanceMeters(lat, lon, la, lo) < 300.0
-        } ?: DiveSite(id = newId(), name = shared.site.name, latitude = lat, longitude = lon, country = shared.site.country, type = shared.site.type)
+        } ?: DiveSite(id = newId(), name = shared.name, latitude = lat, longitude = lon, country = shared.country, type = shared.type)
             .also { saveSite(it) }
+    }
+
+    /** Ajoute au carnet une plongée reçue en fichier, avec toutes ses données (courbe, bouteilles, conditions…). */
+    fun addDiveFile(file: DiveFile): Long {
+        val dive = file.dive.copy(id = newId(), siteId = siteFor(file.site).id, importKey = "", noMerge = false)
+        saveDive(dive)
+        return dive.id
+    }
+
+    fun addSharedDive(shared: SharedDive): Long {
+        val site = siteFor(shared.site)
         val dive = Dive(
             id = newId(),
             siteId = site.id,
@@ -277,6 +317,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
             avgDepthMeters = shared.avg,
             waterTempC = shared.tempC,
             visibilityMeters = shared.visibility,
+            profile = shared.profile?.toProfile(),
         )
         saveDive(dive)
         return dive.id
@@ -315,6 +356,12 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         val earlier = mergeCandidate(later) ?: return
         dives.removeAll { it.id == later.id }
         saveDive(mergeDives(earlier, later), persist = false)
+        saveDives()
+    }
+
+    /** Efface toutes les plongées du carnet (les sites, centres et listes de contrôle sont conservés). */
+    fun deleteAllDives() {
+        dives.clear()
         saveDives()
     }
 

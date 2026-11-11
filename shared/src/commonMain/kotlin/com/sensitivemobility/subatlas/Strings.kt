@@ -99,6 +99,9 @@ interface Strings {
     // Plongées
     val tabDives: String
     val divesTitle: String
+    val unsavedTitle: String
+    val unsavedMessage: String
+    val unsavedDiscard: String
     val newDive: String
     val editDive: String
     val noDives: String
@@ -134,12 +137,24 @@ interface Strings {
     val shearwaterMergeTag: String
     val shearwaterMergeHelp: String
     fun shearwaterMore(count: Int): String
+    fun shearwaterPresent(count: Int): String
+    val advancedSection: String
+    val deleteAllDives: String
+    val deleteAllDivesHint: String
+    val deleteAllTitle: String
+    fun deleteAllMessage(count: Int): String
+    val deleteAllConfirm: String
     fun shearwaterSkipped(count: Int): String
     val shearwaterReading: String
     val computerLabel: String
     val profileTitle: String
     val profileDepthLegend: String
     val profilePressureLegend: String
+    val seriesNdl: String
+    val seriesDeco: String
+    val seriesCns: String
+    val seriesPpo2: String
+    val seriesTts: String
     val ascentRateLabel: String
     fun ascentOver(limit: Int, seconds: Int): String
     val ascentFine: String
@@ -148,6 +163,9 @@ interface Strings {
     fun shareIntro(name: String): String
     val shareBySms: String
     val shareByEmail: String
+    val shareFileButton: String
+    val shareFileIntroNone: String
+    val pickContact: String
     val shareOther: String
     val shareLater: String
     fun shareButton(name: String): String
@@ -199,6 +217,9 @@ interface Strings {
     val avgDepthHint: String
     val sacLabel: String
     val conditionsSection: String
+    val notesLabel: String
+    val pressureLabel: String
+    val consumedLabel: String
     val waterTemp: String
     val visibility: String
     val weight: String
@@ -362,6 +383,9 @@ object FrStrings : Strings {
 
     override val tabDives = "Plongées"
     override val divesTitle = "Mes plongées"
+    override val unsavedTitle = "Modifications non enregistrées"
+    override val unsavedMessage = "Enregistrer cette plongée avant de passer à une autre ?"
+    override val unsavedDiscard = "Ignorer"
     override val newDive = "Nouvelle plongée"
     override val editDive = "Modifier la plongée"
     override val noDives = "Aucune plongée pour l'instant.\nAppuyez sur « Ajouter une plongée » pour l'enregistrer dans votre carnet."
@@ -397,7 +421,7 @@ object FrStrings : Strings {
     }
     override val diveKindLabel = "Type de plongée"
     override fun diveKind(kind: DiveKind) = when (kind) {
-        DiveKind.LEARNING -> "Apprentissage"
+        DiveKind.LEARNING -> "Formation"
         DiveKind.EXPLORATION -> "Exploration"
         DiveKind.SUPERVISING -> "Encadrement"
         DiveKind.TEACHING -> "Enseignement"
@@ -411,7 +435,7 @@ object FrStrings : Strings {
     override val shareGroupCheckbox = "Proposer de partager cette plongée avec la palanquée"
     override val shareWithPeople = "Partager avec…"
     override val shareIntroMany =
-        "Envoyez la plongée à chacun : si l'application est installée, un appui suffit pour l'ajouter à son carnet ; sinon le message lui propose de la télécharger."
+        "Envoie le fichier de la plongée, avec toutes ses données, à chacun : il l'ouvre avec SubAtlas pour l'ajouter à son carnet."
     override val usedMinutesLabel = "Durée d'utilisation"
     override val importShearwater = "Importer depuis Shearwater"
     override val shearwaterTitle = "Import Shearwater"
@@ -427,21 +451,37 @@ object FrStrings : Strings {
     override val shearwaterMergeHelp =
         "Une plongée du carnet à la même date et à moins d'une heure est complétée avec les données de l'ordinateur et reçoit la courbe ; rien de ce que vous avez saisi n'est écrasé."
     override fun shearwaterMore(count: Int) = "… et $count autres plongées"
+    override val advancedSection = "Avancé"
+    override val deleteAllDives = "Effacer les plongées"
+    override val deleteAllDivesHint = "Supprime définitivement toutes les plongées du carnet. Les sites, centres et listes de contrôle sont conservés."
+    override val deleteAllTitle = "Effacer toutes les plongées ?"
+    override fun deleteAllMessage(count: Int) =
+        "Les $count plongée${if (count > 1) "s" else ""} du carnet (courbes, bouteilles, notes…) seront supprimées définitivement. Cette opération est IRRÉVERSIBLE : il n'y a ni corbeille ni annulation. Pense à exporter tes données avant."
+    override val deleteAllConfirm = "Tout effacer"
+    override fun shearwaterPresent(count: Int) = "$count plongée${if (count > 1) "s" else ""} déjà créée${if (count > 1) "s" else ""} / fusionnée${if (count > 1) "s" else ""}"
     override fun shearwaterSkipped(count: Int) = "$count plongée${if (count > 1) "s" else ""} du fichier illisible${if (count > 1) "s" else ""}, ignorée${if (count > 1) "s" else ""}."
     override val shearwaterReading = "Lecture du fichier…"
     override val computerLabel = "Ordinateur"
     override val profileTitle = "Profil de plongée"
     override val profileDepthLegend = "Profondeur (m)"
     override val profilePressureLegend = "Pression (bar)"
+    override val seriesNdl = "LND"
+    override val seriesDeco = "Déco"
+    override val seriesCns = "CNS"
+    override val seriesPpo2 = "PPO2"
+    override val seriesTts = "TTS"
     override val ascentRateLabel = "Vitesse de remontée"
     override fun ascentOver(limit: Int, seconds: Int) = "au-dessus de $limit m/min pendant ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
     override val ascentFine = "toujours sous la limite"
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
     override fun shareIntro(name: String) =
-        "Envoyez la plongée à $name : si l'application est installée, un appui suffit pour l'ajouter à son carnet ; sinon le message lui propose de la télécharger."
+        "Envoie à $name un fichier avec toutes les données de la plongée (courbe, bouteilles, conditions, équipement, notes) : il l'ouvre avec SubAtlas pour l'ajouter à son carnet."
     override val shareBySms = "Envoyer par SMS"
     override val shareByEmail = "Envoyer par e-mail"
+    override val shareFileButton = "Envoyer le fichier de la plongée"
+    override val shareFileIntroNone = "Envoie un fichier avec toutes les données de la plongée (courbe, bouteilles, conditions, équipement, notes). Ton binôme l'ouvre avec SubAtlas pour l'ajouter à son carnet."
+    override val pickContact = "Choisir dans le répertoire"
     override val shareOther = "Autres applications…"
     override val shareLater = "Plus tard"
     override fun shareButton(name: String) = "Partager avec $name"
@@ -493,6 +533,9 @@ object FrStrings : Strings {
     override val avgDepthHint = "Avec les pressions, le volume des bouteilles et la durée, elle permet de calculer votre SAC (consommation à la surface)."
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions et matériel"
+    override val notesLabel = "Notes"
+    override val pressureLabel = "Pression"
+    override val consumedLabel = "Consommé"
     override val waterTemp = "Température de l'eau"
     override val visibility = "Visibilité"
     override val weight = "Lestage"
@@ -739,6 +782,9 @@ object EnStrings : Strings {
 
     override val tabDives = "Dives"
     override val divesTitle = "My dives"
+    override val unsavedTitle = "Unsaved changes"
+    override val unsavedMessage = "Save this dive before moving to another one?"
+    override val unsavedDiscard = "Discard"
     override val newDive = "New dive"
     override val editDive = "Edit dive"
     override val noDives = "No dives yet.\nTap “Add a dive” to record it in your logbook."
@@ -788,7 +834,7 @@ object EnStrings : Strings {
     override val shareGroupCheckbox = "Offer to share this dive with the group"
     override val shareWithPeople = "Share with…"
     override val shareIntroMany =
-        "Send the dive to each person: if the app is installed, one tap adds it to their logbook; otherwise the message invites them to download it."
+        "Send the dive file, with all its data, to each person: they open it with SubAtlas to add it to their logbook."
     override val usedMinutesLabel = "Time on this tank"
     override val importShearwater = "Import from Shearwater"
     override val shearwaterTitle = "Shearwater import"
@@ -803,21 +849,37 @@ object EnStrings : Strings {
     override val shearwaterMergeHelp =
         "A logbook dive on the same date and within one hour is completed with the computer's data and gets the profile; nothing you typed is overwritten."
     override fun shearwaterMore(count: Int) = "… and $count more dives"
+    override val advancedSection = "Advanced"
+    override val deleteAllDives = "Delete all dives"
+    override val deleteAllDivesHint = "Permanently deletes every dive in the logbook. Sites, centers and checklists are kept."
+    override val deleteAllTitle = "Delete all dives?"
+    override fun deleteAllMessage(count: Int) =
+        "The $count dive${if (count != 1) "s" else ""} in the logbook (profiles, tanks, notes…) will be permanently deleted. This CANNOT be undone: there is no trash and no undo. Consider exporting your data first."
+    override val deleteAllConfirm = "Delete everything"
+    override fun shearwaterPresent(count: Int) = "$count dive${if (count != 1) "s" else ""} already created / merged"
     override fun shearwaterSkipped(count: Int) = "$count unreadable dive${if (count != 1) "s" else ""} in the file skipped."
     override val shearwaterReading = "Reading the file…"
     override val computerLabel = "Dive computer"
     override val profileTitle = "Dive profile"
     override val profileDepthLegend = "Depth (m)"
     override val profilePressureLegend = "Pressure (bar)"
+    override val seriesNdl = "NDL"
+    override val seriesDeco = "Deco"
+    override val seriesCns = "CNS"
+    override val seriesPpo2 = "PPO2"
+    override val seriesTts = "TTS"
     override val ascentRateLabel = "Ascent rate"
     override fun ascentOver(limit: Int, seconds: Int) = "above $limit m/min for ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
     override val ascentFine = "always under the limit"
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
     override fun shareIntro(name: String) =
-        "Send the dive to $name: if the app is installed, one tap adds it to their logbook; otherwise the message invites them to download it."
+        "Send $name a file with all the dive's data (profile, tanks, conditions, gear, notes): they open it with SubAtlas to add it to their logbook."
     override val shareBySms = "Send by SMS"
     override val shareByEmail = "Send by email"
+    override val shareFileButton = "Send the dive file"
+    override val shareFileIntroNone = "Sends a file with all the dive's data (profile, tanks, conditions, gear, notes). Your buddy opens it with SubAtlas to add it to their logbook."
+    override val pickContact = "Pick from contacts"
     override val shareOther = "Other apps…"
     override val shareLater = "Later"
     override fun shareButton(name: String) = "Share with $name"
@@ -869,6 +931,9 @@ object EnStrings : Strings {
     override val avgDepthHint = "Together with the pressures, the tank volumes and the duration, it lets the app compute your SAC (surface air consumption)."
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions and gear"
+    override val notesLabel = "Notes"
+    override val pressureLabel = "Pressure"
+    override val consumedLabel = "Used"
     override val waterTemp = "Water temperature"
     override val visibility = "Visibility"
     override val weight = "Weights"

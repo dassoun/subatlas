@@ -92,6 +92,7 @@ internal fun mergeDives(earlier: Dive, later: Dive): Dive {
         group = (a.group + b.group).distinctBy { it.name },
         computer = a.computer.ifBlank { b.computer },
         importKey = (a.importKeys() + b.importKeys()).distinct().joinToString("\n"),
+        importModified = a.importModified + b.importModified,
         profile = mergeProfiles(a.profile, b.profile, gapSeconds) ?: a.profile ?: b.profile,
     )
 }
@@ -106,6 +107,11 @@ private fun mergeProfiles(a: DiveProfile?, b: DiveProfile?, gapSeconds: Int): Di
         depthDm = a.depthDm + List(gap) { 0 } + b.depthDm,
         tempDc = series(a.tempDc, b.tempDc, a.tempDc.lastOrNull() ?: 0),
         pressureBar = series(a.pressureBar, b.pressureBar, a.pressureBar.lastOrNull() ?: 0),
+        ndlMin = series(a.ndlMin, b.ndlMin, 99),
+        decoStopM = series(a.decoStopM, b.decoStopM, 0),
+        ttsMin = series(a.ttsMin, b.ttsMin, 0),
+        ppo2Cb = series(a.ppo2Cb, b.ppo2Cb, 21),
+        cnsPct = series(a.cnsPct, b.cnsPct, a.cnsPct.lastOrNull() ?: 0),
     )
 }
 

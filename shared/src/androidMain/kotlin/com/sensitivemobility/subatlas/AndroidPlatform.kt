@@ -47,6 +47,21 @@ class AndroidPlatformActions(
 
     override fun systemLanguage(): String = java.util.Locale.getDefault().language
 
+    override fun shareFile(name: String, mimeType: String, bytes: ByteArray): Boolean = runCatching {
+        // Fichier temporaire du cache, exposé au temps du partage par le FileProvider de l'appli.
+        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = File(dir, name).apply { writeBytes(bytes) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND)
+            .setType(mimeType)
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = android.content.ClipData.newRawUri(name, uri)
+        context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    }.getOrDefault(false)
+
     override suspend fun saveTextFile(suggestedName: String, text: String): Boolean {
         val uri = pickSaveUri(suggestedName) ?: return false
         withContext(Dispatchers.IO) {
@@ -150,7 +165,41 @@ class AndroidLocationProvider(
 class AndroidContactsProvider(
     private val context: Context,
     private val requestPermission: suspend () -> Boolean,
+    private val pickPhone: suspend () -> Uri? = { null },
 ) : ContactsProvider {
+
+    override val canPick: Boolean = true
+
+    /** Sélecteur de contacts du système : l'utilisateur cherche, voit tous ses contacts et choisit le bon numéro. */
+    override suspend fun pick(): PhoneContact? {
+        val uri = pickPhone() ?: return null
+        return withContext(Dispatchers.IO) {
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+            )
+            context.contentResolver.query(uri, projection, null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return@use null
+                val name = c.getString(0).orEmpty()
+                if (name.isBlank()) return@use null
+                val id = c.getString(2).orEmpty()
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
+                    PackageManager.PERMISSION_GRANTED
+                val email = if (granted && id.isNotEmpty()) {
+                    runCatching {
+                        firstValue(
+                            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+                            ContactsContract.CommonDataKinds.Email.ADDRESS,
+                            ContactsContract.CommonDataKinds.Email.CONTACT_ID,
+                            id,
+                        )
+                    }.getOrDefault("")
+                } else ""
+                PhoneContact(name, c.getString(1).orEmpty(), email)
+            }
+        }
+    }
 
     override suspend fun search(query: String): ContactSearch {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
@@ -171,25 +220,35 @@ class AndroidContactsProvider(
             arrayOf("%$query%"),
             "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC",
         )?.use { c ->
-            while (c.moveToNext() && out.size < 6) {
+            while (c.moveToNext() && out.size < 15) {
                 val id = c.getString(0) ?: continue
                 val name = c.getString(1) ?: continue
-                val phone = firstValue(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    ContactsContract.CommonDataKinds.Phone.NUMBER,
-                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
-                    id,
-                )
                 val email = firstValue(
                     ContactsContract.CommonDataKinds.Email.CONTENT_URI,
                     ContactsContract.CommonDataKinds.Email.ADDRESS,
                     ContactsContract.CommonDataKinds.Email.CONTACT_ID,
                     id,
                 )
-                out += PhoneContact(name, phone, email)
+                // Un résultat par numéro : deux contacts de même nom (ou une personne à deux numéros) restent distinguables.
+                val phones = allValues(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    id,
+                ).distinctBy { p -> p.filter { it.isDigit() } }.take(3)
+                if (phones.isEmpty()) out += PhoneContact(name, "", email)
+                else phones.forEach { out += PhoneContact(name, it, email) }
             }
         }
         return out
+    }
+
+    private fun allValues(uri: Uri, column: String, idColumn: String, id: String): List<String> {
+        val values = mutableListOf<String>()
+        context.contentResolver.query(uri, arrayOf(column), "$idColumn = ?", arrayOf(id), null)?.use {
+            while (it.moveToNext()) it.getString(0)?.takeIf { v -> v.isNotBlank() }?.let(values::add)
+        }
+        return values
     }
 
     private fun firstValue(uri: Uri, column: String, idColumn: String, id: String): String =
@@ -197,3 +256,4 @@ class AndroidContactsProvider(
             if (it.moveToFirst()) it.getString(0).orEmpty() else ""
         }.orEmpty()
 }
+

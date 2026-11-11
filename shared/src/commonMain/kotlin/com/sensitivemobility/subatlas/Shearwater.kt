@@ -10,11 +10,14 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlin.math.abs
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 /** Une plongée lue dans un export Shearwater Cloud, avant d'être ajoutée au carnet. */
 internal class ShearwaterDive(
     /** Identifiant stable (`shearwater:` + identifiant Shearwater) : réimporter le même fichier ne crée pas de doublon. */
     val key: String,
+    /** Date de dernière modification de la plongée dans Shearwater Cloud (« 2026-11-03 07:15:13 »), vide si absente. */
+    val modified: String,
     val date: String,
     val startTime: String?,
     val endTime: String?,
@@ -113,6 +116,7 @@ internal object ShearwaterImport {
 
         return ShearwaterDive(
             key = "shearwater:$id",
+            modified = d["LastModified"].str().trim(),
             date = date,
             startTime = start,
             endTime = end,
@@ -165,11 +169,33 @@ internal object ShearwaterImport {
             val g = o?.get("GasProfile")?.asObject()
             return (g?.num("O2Percent")?.toInt() ?: 21) to (g?.num("HePercent")?.toInt() ?: 0)
         }
+        // Mélanges utilisés pendant la plongée (changements de gaz compris), avec le temps passé sur chacun.
+        class Use(var seconds: Double = 0.0, var depthSeconds: Double = 0.0)
+        val uses = LinkedHashMap<Pair<Int, Int>, Use>()
+        val gasProfiles = (tankJson?.get("GasProfiles") as? JsonArray).orEmpty().mapNotNull { it.asObject() }
+        for (g in gasProfiles) {
+            val mix = (g.num("O2Percent")?.toInt() ?: 21) to (g.num("HePercent")?.toInt() ?: 0)
+            val seconds = maxOf(0.0, (g.num("EndTimeInSeconds") ?: 0.0) - (g.num("StartTimeInSeconds") ?: 0.0))
+            val u = uses.getOrPut(mix) { Use() }
+            u.seconds += seconds
+            u.depthSeconds += seconds * (g.num("AverageDepthInMeters") ?: 0.0)
+        }
+        // Un mélange utilisé moins de 30 s au total n'est pas une bouteille : changement de gaz accidentel ou parasite.
+        fun extraTank(mix: Pair<Int, Int>, u: Use, index: Int) = Tank(
+            volumeLiters = volumes.getOrNull(index),
+            o2Percent = mix.first,
+            hePercent = mix.second,
+            avgDepthMeters = if (u.seconds > 0) round(u.depthSeconds / u.seconds * 10) / 10 else null,
+            usedMinutes = (u.seconds / 60).roundToInt().coerceAtLeast(1),
+        )
+
         if (used.isEmpty()) {
-            val g = (tankJson?.get("GasProfiles") as? JsonArray)?.firstOrNull()?.asObject()
+            val real = uses.filter { it.value.seconds >= 30 }
+            if (real.size > 1) return real.entries.mapIndexed { i, (mix, u) -> extraTank(mix, u, i) }
+            val g = gasProfiles.firstOrNull()
             return listOf(Tank(volumeLiters = volumes.firstOrNull(), o2Percent = g?.num("O2Percent")?.toInt() ?: 21, hePercent = g?.num("HePercent")?.toInt() ?: 0))
         }
-        return used.mapIndexed { i, t ->
+        val withSensor = used.mapIndexed { i, t ->
             val (o2, he) = gas(t)
             Tank(
                 volumeLiters = volumes.getOrNull(i) ?: volumes.firstOrNull(),
@@ -179,6 +205,11 @@ internal object ShearwaterImport {
                 pressureEndBar = t["EndPressurePSI"].str().toDoubleOrNull()?.let { round(it * PSI_TO_BAR).toInt() },
             )
         }
+        // Les autres mélanges réellement respirés (bouteille de déco sans capteur, par exemple) sont ajoutés sans pression.
+        val covered = withSensor.map { it.o2Percent to it.hePercent }.toSet()
+        val extra = uses.filter { (mix, u) -> mix !in covered && u.seconds >= 30 }
+            .entries.mapIndexed { i, (mix, u) -> extraTank(mix, u, withSensor.size + i) }
+        return withSensor + extra
     }
 
     private fun suit(dress: String): SuitType? {
@@ -287,6 +318,11 @@ internal object ShearwaterImport {
         val depth = ArrayList<Double>()
         val temp = ArrayList<Double>()
         val pressure = ArrayList<Double>()
+        val ndl = ArrayList<Int>()
+        val stop = ArrayList<Int>()
+        val tts = ArrayList<Int>()
+        val ppo2 = ArrayList<Int>()
+        val cns = ArrayList<Int>()
         var o = 0
         while (o + 32 <= raw.size) {
             if (raw[o].toInt() == 0x01) {
@@ -296,6 +332,14 @@ internal object ShearwaterImport {
                 temp += if (imperial) (t - 32) / 1.8 else t.toDouble()
                 val p = ((raw[o + 28].toInt() and 0xFF) shl 8) or (raw[o + 29].toInt() and 0xFF)
                 pressure += if (p < 0xFFF0) p * 2 * PSI_TO_BAR else -1.0
+                // Octets 3-4 : profondeur du premier palier (0 hors décompression) ; 6 : TTS (min) ; 7 : PPO2 (0,01 bar) ;
+                // 10 : LND (min, 99 = au moins 99) ; 23 : CNS (%).
+                val stopRaw = ((raw[o + 3].toInt() and 0xFF) shl 8) or (raw[o + 4].toInt() and 0xFF)
+                stop += if (imperial) round(stopRaw * 0.3048).toInt() else stopRaw
+                tts += raw[o + 6].toInt() and 0xFF
+                ppo2 += raw[o + 7].toInt() and 0xFF
+                ndl += raw[o + 10].toInt() and 0xFF
+                cns += raw[o + 23].toInt() and 0xFF
             }
             o += 32
         }
@@ -319,6 +363,11 @@ internal object ShearwaterImport {
         val slice = from..to
         val pressures = pressure.slice(slice)
         return DiveProfile(
+            ndlMin = ndl.slice(slice).map { it.coerceAtMost(99) },
+            decoStopM = stop.slice(slice),
+            ttsMin = tts.slice(slice),
+            ppo2Cb = ppo2.slice(slice),
+            cnsPct = cns.slice(slice),
             intervalSeconds = interval,
             depthDm = depth.slice(slice).map { round(it * 10).toInt() },
             tempDc = temp.slice(slice).map { round(it * 10).toInt() },

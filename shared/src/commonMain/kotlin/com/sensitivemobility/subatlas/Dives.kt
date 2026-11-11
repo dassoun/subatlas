@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -213,6 +214,8 @@ internal fun DiveList(
                 }
             }
         }
+        // Numéro de la plongée : son rang dans l'ordre chronologique (1 = la plus ancienne).
+        val numbers = state.dives.sortedWith(diveOrder).reversed().mapIndexed { i, d -> d.id to i + 1 }.toMap()
         LazyColumn(
             Modifier.weight(1f),
             state = listState,
@@ -229,7 +232,7 @@ internal fun DiveList(
                         Column(Modifier.weight(1.4f)) {
                             val previous = if (dive.noMerge) null else state.mergeCandidate(dive)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
+                                Text("#${numbers[dive.id]} · " + s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
                                 if (previous != null) {
                                     Spacer(Modifier.width(10.dp))
                                     MergeMenuChip(
@@ -308,43 +311,62 @@ internal fun ReadingDialog() {
     )
 }
 
+/** Numéro d'une plongée : son rang chronologique (1 = la plus ancienne). Toujours continu, même après une fusion ou une suppression. */
+internal fun AppState.diveNumber(id: Long): Int = dives.sortedWith(diveOrder).reversed().indexOfFirst { it.id == id } + 1
+
 /** Aperçu de l'import : ce qui sera ajouté et ce qui sera fusionné avec une plongée du carnet. */
 @Composable
 internal fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, skipped: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val s = LocalStrings.current
-    val merged = items.count { it.mergeInto != null }
+    // Les plongées déjà créées ou fusionnées à partir de cet export ne sont pas refaites : elles sont repliées sous un résumé.
+    val (present, todo) = items.partition { it.alreadyDone }
+    val merged = todo.count { it.mergeInto != null }
+    var showPresent by remember { mutableStateOf(false) }
+
+    @Composable
+    fun PlanRow(item: ShearwaterPlanItem, tag: String, color: androidx.compose.ui.graphics.Color) {
+        val sw = item.dive
+        Column {
+            Text(
+                listOf(s.dateText(sw.date), sw.startTime.orEmpty(), "·", sw.siteName).filter { it.isNotEmpty() }.joinToString(" "),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            val details = listOfNotNull(
+                sw.maxDepth?.let { "max ${formatNum(it)} m" },
+                sw.durationSeconds?.let { s.minutesShort(it / 60) },
+                tag.ifEmpty { null },
+            )
+            Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = color)
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(s.shearwaterTitle) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(s.shearwaterFound(items.size, items.size - merged, merged))
-                // Un gros fichier : on montre les premières plongées, le résumé du dessus donne les totaux.
-                items.take(12).forEach { item ->
-                    val sw = item.dive
-                    Column {
-                        Text(
-                            listOf(s.dateText(sw.date), sw.startTime.orEmpty(), "·", sw.siteName).filter { it.isNotEmpty() }.joinToString(" "),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        val details = listOfNotNull(
-                            sw.maxDepth?.let { "max\u00A0${formatNum(it)}\u00A0m" },
-                            sw.durationSeconds?.let { s.minutesShort(it / 60) },
-                            if (item.mergeInto != null) s.shearwaterMergeTag else s.shearwaterNewTag,
-                        )
-                        Text(
-                            details.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (item.mergeInto != null) StatusWarn else StatusOk,
-                        )
-                    }
+                if (todo.isNotEmpty()) Text(s.shearwaterFound(todo.size, todo.size - merged, merged))
+                // Toutes les plongées à traiter sont listées.
+                // Les nouvelles plongées d'abord, puis les fusions (dans chaque groupe, la plus récente en premier).
+                todo.sortedBy { it.mergeInto != null }.forEach { item ->
+                    PlanRow(item, if (item.mergeInto != null) s.shearwaterMergeTag else s.shearwaterNewTag, if (item.mergeInto != null) StatusWarn else StatusOk)
                 }
-                if (items.size > 12) Text(s.shearwaterMore(items.size - 12), style = MaterialTheme.typography.bodyMedium)
+                if (present.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showPresent = !showPresent }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(s.shearwaterPresent(present.size), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        Text(if (showPresent) "▴" else "▾", style = MaterialTheme.typography.titleMedium)
+                    }
+                    if (showPresent) present.forEach { PlanRow(it, "", MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
                 if (skipped > 0) Text(s.shearwaterSkipped(skipped), style = MaterialTheme.typography.bodySmall, color = StatusWarn)
                 if (merged > 0) Text(s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = onConfirm) { Text(s.shearwaterConfirm) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = todo.isNotEmpty()) { Text(s.shearwaterConfirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
     )
 }
@@ -450,70 +472,85 @@ internal fun DiveDetailView(
     val site = state.site(dive.siteId)
     val previousDive = state.mergeCandidate(dive)
     val recipients = dive.shareRecipients
-    val canShare = site != null && recipients.isNotEmpty()
+    val canShare = site != null
     Column(
         Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(s.dateText(dive.date), style = MaterialTheme.typography.headlineSmall)
         if (site != null) {
             TextButton(onClick = { onOpenSite(site.id) }) {
                 SiteLine(site, MaterialTheme.typography.titleMedium)
             }
         }
+        // Type de plongée juste sous le site.
         dive.kind?.let { k ->
-            val kindText = listOfNotNull(s.diveKind(k), dive.kindOther.takeIf { k == DiveKind.OTHER && it.isNotBlank() })
-            Text(s.labelled(s.diveKindLabel, kindText.joinToString(" · ")))
+            val txt = listOfNotNull(s.diveKind(k), dive.kindOther.takeIf { k == DiveKind.OTHER && it.isNotBlank() }).joinToString(" · ")
+            // Pastille de la couleur du type, la même que celle de la carte dans la liste.
+            androidx.compose.material3.Surface(
+                color = diveCardColor(k, state.settings),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+            ) {
+                Text(
+                    txt,
+                    Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
-        dive.timeRangeText(s)?.let { Text(it) }
-        dive.durationMinutes?.let { Text(s.labelled(s.durationLabel, s.minutesShort(it))) }
-        dive.maxDepth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
-        dive.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
+        dive.timeRangeText(s)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
+        // Chiffres clés en tuiles : la valeur en grand, le libellé en petit dessous.
+        val tiles = listOfNotNull(
+            dive.maxDepth?.let { s.depthLabel to "${formatNum(it)} m" },
+            dive.avgDepthMeters?.let { s.avgDepthLabel to "${formatNum(it)} m" },
+            dive.durationMinutes?.let { s.durationLabel to s.minutesShort(it) },
+            dive.sacLitersPerMin?.let { s.sacLabel to "${formatNum(round(it * 10) / 10)} L/min" },
+        )
+        tiles.chunked(2).forEach { rowTiles ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowTiles.forEach { (label, value) -> StatTile(label, value, Modifier.weight(1f)) }
+                if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
         dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth(), onFullscreen = { fullscreen = true }, onOpenProcedure = onOpenProcedure) }
 
         dive.tanks.forEachIndexed { i, tank ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("${s.tankTitle(i + 1)} · ${tank.gasLabel(s)}", style = MaterialTheme.typography.titleSmall)
-                    tank.volumeLiters?.let { Text(s.labelled(s.volume, "${formatNum(it)} L")) }
-                    tank.pressureText()?.let { Text(it) }
-                    tank.avgDepthMeters?.let { Text(s.labelled(s.avgDepthLabel, "${formatNum(it)} m")) }
-                    tank.usedMinutes?.let { Text(s.labelled(s.usedMinutesLabel, s.minutesShort(it))) }
-                    tank.consumedLiters?.let { Text(s.consumedLine(round(it).toInt())) }
-                    // Avec plusieurs bouteilles, chacune a son SAC (si on connaît sa durée d'utilisation).
-                    if (dive.tanks.size > 1) {
-                        tank.sacLitersPerMin(null, dive.avgDepthMeters)?.let {
-                            Text(s.labelled(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min"), color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
+            FactCard("${s.tankTitle(i + 1)} · ${tank.gasLabel(s)}") {
+                tank.volumeLiters?.let { Fact(s.volume, "${formatNum(it)} L") }
+                tank.pressureText()?.let { Fact(s.pressureLabel, it) }
+                tank.avgDepthMeters?.let { Fact(s.avgDepthLabel, "${formatNum(it)} m") }
+                tank.usedMinutes?.let { Fact(s.usedMinutesLabel, s.minutesShort(it)) }
+                tank.consumedLiters?.let { Fact(s.consumedLabel, "${round(it).toInt()} L") }
+                // Avec plusieurs bouteilles, chacune a son SAC (si on connaît sa durée d'utilisation).
+                if (dive.tanks.size > 1) {
+                    tank.sacLitersPerMin(null, dive.avgDepthMeters)?.let { Fact(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min", highlight = true) }
                 }
             }
         }
 
-        dive.sacLitersPerMin?.let {
-            Text(
-                s.labelled(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min"),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        dive.waterTempC?.let { Text(s.labelled(s.waterTemp, "${formatNum(it)} °C")) }
-        dive.visibilityMeters?.let { Text(s.labelled(s.visibility, "$it m")) }
         val suitText = listOfNotNull(
             // « Humide - 5 mm » ; l'épaisseur n'est ajoutée que si elle est renseignée.
             listOfNotNull(dive.suitType?.let { s.suitType(it) }, dive.suitThicknessMm?.let { "${formatNum(it)} mm" })
                 .joinToString(" - ").takeIf { it.isNotEmpty() },
             dive.suit.takeIf { it.isNotBlank() },
         ).joinToString(" · ")
-        if (suitText.isNotEmpty()) Text(s.labelled(s.suit, suitText))
-        dive.weightKg?.let { Text(s.labelled(s.weight, "${formatNum(it)} kg")) }
-        if (dive.buddy.isNotBlank()) Text(s.labelled(s.buddy, dive.buddy))
-        if (dive.group.isNotEmpty()) Text(s.labelled(s.groupSection, dive.group.joinToString(", ") { it.name }))
-        if (dive.computer.isNotBlank()) Text(s.labelled(s.computerLabel, dive.computer))
-        if (dive.notes.isNotBlank()) Text(s.notesLine(dive.notes))
+        val hasFacts = dive.waterTempC != null || dive.visibilityMeters != null || suitText.isNotEmpty() || dive.weightKg != null ||
+            dive.buddy.isNotBlank() || dive.group.isNotEmpty() || dive.computer.isNotBlank()
+        if (hasFacts) {
+            FactCard(s.conditionsSection) {
+                dive.waterTempC?.let { Fact(s.waterTemp, "${formatNum(it)} °C") }
+                dive.visibilityMeters?.let { Fact(s.visibility, "$it m") }
+                if (suitText.isNotEmpty()) Fact(s.suit, suitText)
+                dive.weightKg?.let { Fact(s.weight, "${formatNum(it)} kg") }
+                if (dive.buddy.isNotBlank()) Fact(s.buddy, dive.buddy)
+                if (dive.group.isNotEmpty()) Fact(s.groupSection, dive.group.joinToString(", ") { it.name })
+                if (dive.computer.isNotBlank()) Fact(s.computerLabel, dive.computer)
+            }
+        }
+        if (dive.notes.isNotBlank()) {
+            FactCard(s.notesLabel) { Text(dive.notes, style = MaterialTheme.typography.bodyLarge) }
+        }
 
         val lat = site?.latitude
         val lon = site?.longitude
@@ -524,7 +561,7 @@ internal fun DiveDetailView(
         }
         if (canShare) {
             OutlinedButton(onClick = { sharing = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (recipients.size == 1) s.shareButton(recipients[0].name) else s.shareWithPeople)
+                Text(when (recipients.size) { 0 -> s.shareTitle; 1 -> s.shareButton(recipients[0].name); else -> s.shareWithPeople })
             }
         }
         // Dans la fiche, la fusion reste proposée même si on a refusé qu'elle le soit dans la liste.
@@ -546,6 +583,41 @@ internal fun DiveDetailView(
             s.confirmDeleteDive(site?.name ?: "?", s.dateText(dive.date)),
             onConfirm = { confirm = false; onDelete() },
             onDismiss = { confirm = false },
+        )
+    }
+}
+
+/** Une tuile de chiffre clé : la valeur en grand, le libellé en petit dessous. */
+@Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Une carte à titre coloré qui regroupe des lignes libellé / valeur. */
+@Composable
+private fun FactCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            content()
+        }
+    }
+}
+
+/** Une ligne : libellé discret à gauche, valeur en gras à droite. */
+@Composable
+private fun Fact(label: String, value: String, highlight: Boolean = false) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value, Modifier.weight(1.4f), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            color = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -621,6 +693,9 @@ internal fun DiveForm(
     actions: PlatformActions,
     contacts: ContactsProvider,
     pad: PaddingValues,
+    goRequest: Long? = null,
+    onGo: (Long) -> Unit = {},
+    onGoHandled: () -> Unit = {},
     onDone: () -> Unit,
 ) {
     val s = LocalStrings.current
@@ -708,6 +783,76 @@ internal fun DiveForm(
         (weight.isBlank() || weight.toDec() != null) &&
         (thickness.isBlank() || thickness.toDec() != null)
     val valid = selectedSite != null && tanks.all { it.valid } && extrasOk
+
+    // Enregistre la plongée du formulaire (et la position du site si demandé).
+    fun persist(): Dive {
+        val site = selectedSite!!
+        if (attachPosition && here != null && site.latitude == null) {
+            state.saveSite(site.copy(latitude = here.latitude, longitude = here.longitude))
+        }
+        val dive = Dive(
+                id = existing?.id ?: state.newId(),
+                siteId = site.id,
+                date = date,
+                startTime = startTime,
+                endTime = endTime,
+                tanks = tanks.map { it.toTank() },
+                maxDepthMeters = maxDepth.toDec(),
+                avgDepthMeters = avgDepth.toDec(),
+                waterTempC = waterTemp.toDec(),
+                visibilityMeters = visibility.trim().toIntOrNull(),
+                weightKg = weight.toDec(),
+                suit = existing?.suit.orEmpty(),
+                suitType = suitType,
+                suitThicknessMm = if (suitType?.hasThickness == true) thickness.toDec() else null,
+                buddy = buddy.trim(),
+                buddyFromContacts = buddyFromContacts,
+                buddyPhone = buddyPhone,
+                buddyEmail = buddyEmail,
+                notes = notes.trim(),
+                kind = kind,
+                kindOther = if (kind == DiveKind.OTHER) kindOther.trim() else "",
+                group = if (kind?.hasGroup == true) group.filter { it.name.isNotBlank() }.map { it.toPerson() } else emptyList(),
+                // Ce que le formulaire ne montre pas (données de l'ordinateur de plongée) doit survivre à la modification.
+                computer = existing?.computer.orEmpty(),
+                importKey = existing?.importKey.orEmpty(),
+                importModified = existing?.importModified.orEmpty(),
+                noMerge = existing?.noMerge ?: false,
+                profile = existing?.profile,
+            )
+        state.saveDive(dive)
+        return dive
+    }
+
+
+    // Modifications non enregistrées : on compare l'état des champs à celui d'ouverture.
+    fun snapshot() = listOf(
+        siteId, date, startTime, endTime, tanks.toList(), maxDepth, avgDepth, kind, kindOther, group.toList(), waterTemp,
+        visibility, weight, suitType, thickness, buddy, buddyPhone, buddyEmail, notes, attachPosition,
+    ).toString()
+    val initialSnapshot = remember { snapshot() }
+    val dirty = snapshot() != initialSnapshot
+    var askGo by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(goRequest) {
+        if (goRequest != null) {
+            if (dirty) askGo = goRequest else onGo(goRequest)
+            onGoHandled()
+        }
+    }
+    askGo?.let { target ->
+        AlertDialog(
+            onDismissRequest = { askGo = null },
+            title = { Text(s.unsavedTitle) },
+            text = { Text(s.unsavedMessage) },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = { askGo = null }) { Text(s.cancel) }
+                    TextButton(onClick = { askGo = null; onGo(target) }) { Text(s.unsavedDiscard) }
+                    TextButton(enabled = valid, onClick = { persist(); askGo = null; onGo(target) }) { Text(s.save) }
+                }
+            },
+        )
+    }
 
     Column(
         Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
@@ -914,40 +1059,7 @@ internal fun DiveForm(
         Button(
             enabled = valid,
             onClick = {
-                val site = selectedSite!!
-                if (attachPosition && here != null && site.latitude == null) {
-                    state.saveSite(site.copy(latitude = here.latitude, longitude = here.longitude))
-                }
-                val dive = Dive(
-                        id = existing?.id ?: state.newId(),
-                        siteId = site.id,
-                        date = date,
-                        startTime = startTime,
-                        endTime = endTime,
-                        tanks = tanks.map { it.toTank() },
-                        maxDepthMeters = maxDepth.toDec(),
-                        avgDepthMeters = avgDepth.toDec(),
-                        waterTempC = waterTemp.toDec(),
-                        visibilityMeters = visibility.trim().toIntOrNull(),
-                        weightKg = weight.toDec(),
-                        suit = existing?.suit.orEmpty(),
-                        suitType = suitType,
-                        suitThicknessMm = if (suitType?.hasThickness == true) thickness.toDec() else null,
-                        buddy = buddy.trim(),
-                        buddyFromContacts = buddyFromContacts,
-                        buddyPhone = buddyPhone,
-                        buddyEmail = buddyEmail,
-                        notes = notes.trim(),
-                        kind = kind,
-                        kindOther = if (kind == DiveKind.OTHER) kindOther.trim() else "",
-                        group = if (kind?.hasGroup == true) group.filter { it.name.isNotBlank() }.map { it.toPerson() } else emptyList(),
-                        // Ce que le formulaire ne montre pas (données de l'ordinateur de plongée) doit survivre à la modification.
-                        computer = existing?.computer.orEmpty(),
-                        importKey = existing?.importKey.orEmpty(),
-                        noMerge = existing?.noMerge ?: false,
-                        profile = existing?.profile,
-                    )
-                state.saveDive(dive)
+                val dive = persist()
                 // Qui proposer de joindre : le binôme et/ou la palanquée, selon les cases cochées.
                 val toShare = (if (shareAfter) dive.shareRecipients.filter { it.name == dive.buddy } else emptyList()) +
                     (if (shareGroupAfter) dive.group.filter { it.phone.isNotBlank() || it.email.isNotBlank() } else emptyList())
@@ -1236,6 +1348,7 @@ private fun BuddyField(
     var results by remember { mutableStateOf<List<PhoneContact>>(emptyList()) }
     var denied by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<String?>(null) } // nom choisi : plus de suggestions pour ce texte
+    val scope = rememberCoroutineScope()
     val q = name.trim()
 
     LaunchedEffect(q) {
@@ -1270,6 +1383,16 @@ private fun BuddyField(
             name, { picked = null; onName(it) },
             label = { Text(label ?: s.buddy) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
+        if (contacts.canPick) {
+            TextButton(onClick = {
+                scope.launch {
+                    contacts.pick()?.let { c ->
+                        picked = c.name
+                        onPick(c.name, c.phone, c.email, true)
+                    }
+                }
+            }) { Text("\uD83D\uDC64 " + s.pickContact) }
+        }
         if (denied && q.isNotEmpty()) Text(s.contactsDenied, style = MaterialTheme.typography.bodySmall)
         if (suggestions.isNotEmpty()) {
             Card(
@@ -1304,8 +1427,8 @@ private fun BuddyField(
 // ----------------------------------------------------------------- Partage
 
 /**
- * Propose d'envoyer la plongée aux personnes données (binôme, palanquée) par SMS, e-mail ou n'importe quelle appli,
- * avec un lien pour l'ajouter à leur carnet en un appui.
+ * Propose d'envoyer la plongée sous forme de fichier (toutes ses données, courbe comprise) : la feuille de partage du
+ * système laisse choisir WhatsApp, la messagerie, l'e-mail… Le binôme ouvre le fichier avec SubAtlas pour l'ajouter.
  */
 @Composable
 private fun ShareDiveDialog(
@@ -1316,33 +1439,30 @@ private fun ShareDiveDialog(
     onDismiss: () -> Unit,
 ) {
     val s = LocalStrings.current
-    val message = s.shareMessage(site.fullName(), s.dateText(dive.date), DiveLink.webLink(dive, site))
+    val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(s.shareTitle) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (recipients.size == 1) s.shareIntro(recipients[0].name) else s.shareIntroMany)
-                recipients.forEach { person ->
-                    val phone = person.phone.filter { it.isDigit() || it == '+' }
-                    if (recipients.size > 1) Text(person.name, style = MaterialTheme.typography.titleSmall)
-                    if (phone.isNotEmpty()) {
-                        Button(onClick = { actions.openLink("sms:$phone?body=${urlEncode(message)}") }, modifier = Modifier.fillMaxWidth()) {
-                            Text(s.shareBySms)
+                Text(
+                    when (recipients.size) {
+                        0 -> s.shareFileIntroNone
+                        1 -> s.shareIntro(recipients[0].name)
+                        else -> s.shareIntroMany
+                    },
+                )
+                Button(
+                    onClick = {
+                        val name = DiveFileCodec.fileName(dive, site)
+                        val text = DiveFileCodec.encode(dive, site)
+                        if (!actions.shareFile(name, "application/json", text.encodeToByteArray())) {
+                            // Pas de partage de fichier sur cette plateforme : on propose de l'enregistrer.
+                            scope.launch { runCatching { actions.saveTextFile(name, text) } }
                         }
-                    }
-                    if (person.email.isNotBlank()) {
-                        Button(
-                            onClick = {
-                                actions.openLink("mailto:${person.email.trim()}?subject=${urlEncode(s.shareSubject)}&body=${urlEncode(message)}")
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(s.shareByEmail) }
-                    }
-                }
-                OutlinedButton(onClick = { actions.shareText(message) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(s.shareOther)
-                }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(s.shareFileButton) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(s.shareLater) } },

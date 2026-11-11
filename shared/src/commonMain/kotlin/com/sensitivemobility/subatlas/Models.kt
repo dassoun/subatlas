@@ -168,21 +168,28 @@ data class DiveProfile(
     val tempDc: List<Int> = emptyList(),
     /** Pression de la bouteille 1 en bar ; vide s'il n'y avait pas de capteur. */
     val pressureBar: List<Int> = emptyList(),
+    /** LND (temps sans palier restant) en minutes, plafonné à 99 ; vide si inconnu. */
+    val ndlMin: List<Int> = emptyList(),
+    /** Profondeur du premier palier (plafond de décompression) en mètres, 0 hors décompression ; vide si inconnu. */
+    val decoStopM: List<Int> = emptyList(),
+    /** TTS (temps pour remonter en surface, paliers compris) en minutes ; vide si inconnu. */
+    val ttsMin: List<Int> = emptyList(),
+    /** PPO2 en centibars (0,01 bar) ; vide si inconnue. */
+    val ppo2Cb: List<Int> = emptyList(),
+    /** Toxicité à l'oxygène (CNS) en pourcent ; vide si inconnue. */
+    val cnsPct: List<Int> = emptyList(),
 ) {
     val durationSeconds: Int get() = (depthDm.size - 1).coerceAtLeast(0) * intervalSeconds
 
     /**
-     * Vitesse de remontée en m/min (positive en remontant, négative en descendant), un point par échantillon. Elle est
-     * lissée sur environ 30 s : sur 5 s, le clapot suffit à faire osciller la profondeur de plusieurs mètres par minute.
+     * Vitesse de remontée en m/min (positive en remontant, négative en descendant), un point par échantillon : l'écart de
+     * profondeur avec l'échantillon précédent, ramené à la minute (sans lissage).
      */
     fun ascentRates(): List<Double> {
         val n = depthDm.size
         if (n < 2 || intervalSeconds <= 0) return List(n) { 0.0 }
-        val k = (30 / intervalSeconds).coerceIn(1, 12)
-        return List(n) { i ->
-            val j = maxOf(0, i - k)
-            if (i == j) 0.0 else (depthDm[j] - depthDm[i]) / 10.0 / ((i - j) * intervalSeconds / 60.0)
-        }
+        val perMinute = 60.0 / intervalSeconds
+        return List(n) { i -> if (i == 0) 0.0 else (depthDm[i - 1] - depthDm[i]) / 10.0 * perMinute }
     }
 }
 
@@ -223,6 +230,8 @@ data class Dive(
     val computer: String = "",
     /** Identifiant de la plongée dans la source importée : évite les doublons si on réimporte le même fichier. */
     val importKey: String = "",
+    /** Date de dernière modification de chaque plongée importée dans la source (clé d'import → date) : un réimport ne propose que ce qui a changé depuis. */
+    val importModified: Map<String, String> = emptyMap(),
     /** L'utilisateur a refusé la fusion avec la plongée précédente : la liste ne la propose plus. */
     val noMerge: Boolean = false,
     /** Courbe de la plongée (profondeur, température, pression), si elle a été importée. */

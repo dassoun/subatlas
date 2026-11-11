@@ -26,6 +26,14 @@ class MainActivity : ComponentActivity() {
             pendingContactsPermission?.complete(granted)
         }
 
+    private var pendingPickPhone: CompletableDeferred<Uri?>? = null
+
+    // Sélecteur de contacts du système : renvoie le numéro choisi, sans demander l'accès à tout le répertoire.
+    private val pickPhoneLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            pendingPickPhone?.complete(if (result.resultCode == RESULT_OK) result.data?.data else null)
+        }
+
     private var pendingSave: CompletableDeferred<Uri?>? = null
     private var pendingOpen: CompletableDeferred<Uri?>? = null
 
@@ -54,14 +62,43 @@ class MainActivity : ComponentActivity() {
                 permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             }.await()
         }
-        val contacts = AndroidContactsProvider(this) {
-            CompletableDeferred<Boolean>().also {
-                pendingContactsPermission = it
-                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-            }.await()
-        }
+        val contacts = AndroidContactsProvider(
+            this,
+            requestPermission = {
+                CompletableDeferred<Boolean>().also {
+                    pendingContactsPermission = it
+                    contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                }.await()
+            },
+            pickPhone = {
+                CompletableDeferred<Uri?>().also {
+                    pendingPickPhone = it
+                    pickPhoneLauncher.launch(Intent(Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+                }.await()
+            },
+        )
         handleIntent(intent)
         setContent { App(storage, location, actions, contacts) }
+        excludeEdgesFromBackGesture()
+    }
+
+    /**
+     * Le glissé d'une fiche à l'autre part souvent du bord de l'écran, où le système le prendrait pour le geste « retour ».
+     * Android permet de réserver au plus 200 dp de hauteur par bord : on les place au milieu de l'écran.
+     */
+    private fun excludeEdgesFromBackGesture() {
+        if (Build.VERSION.SDK_INT < 29) return
+        val decor = window.decorView
+        decor.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            val d = v.resources.displayMetrics.density
+            val edge = (32 * d).toInt()
+            val half = (100 * d).toInt()
+            val mid = (t + b) / 2
+            v.systemGestureExclusionRects = listOf(
+                android.graphics.Rect(0, mid - half, edge, mid + half),
+                android.graphics.Rect(r - l - edge, mid - half, r - l, mid + half),
+            )
+        }
     }
 
     // Lien de plongée partagée (subatlas://dive?d=…) ou fichier reçu d'une autre appli : transmis à l'écran principal.

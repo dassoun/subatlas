@@ -69,15 +69,32 @@ private val DarkColors = darkColorScheme(
 /** Seuils de vitesse de remontée en vigueur (réglages), lus par les courbes de plongée. */
 internal val LocalAscentScale = staticCompositionLocalOf { AscentScale() }
 
+/** Courbes affichées sur le graphique d'une plongée (réglage) et façon d'en activer ou d'en retirer une. */
+internal class ChartPrefs(val shown: Set<ChartSeries>, val toggle: (ChartSeries) -> Unit)
+
+internal val LocalChartPrefs = staticCompositionLocalOf { ChartPrefs(setOf(ChartSeries.PRESSURE)) {} }
+
 @Composable
-fun SubAtlasTheme(mode: ThemeMode, strings: Strings, ascent: AscentScale = AscentScale(), content: @Composable () -> Unit) {
+fun SubAtlasTheme(
+    mode: ThemeMode,
+    strings: Strings,
+    ascent: AscentScale = AscentScale(),
+    chartSeries: Set<ChartSeries> = setOf(ChartSeries.PRESSURE),
+    onToggleSeries: (ChartSeries) -> Unit = {},
+    content: @Composable () -> Unit,
+) {
     val dark = when (mode) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
-        CompositionLocalProvider(LocalStrings provides strings, LocalAscentScale provides ascent, content = content)
+        CompositionLocalProvider(
+            LocalStrings provides strings,
+            LocalAscentScale provides ascent,
+            LocalChartPrefs provides ChartPrefs(chartSeries, onToggleSeries),
+            content = content,
+        )
     }
 }
 

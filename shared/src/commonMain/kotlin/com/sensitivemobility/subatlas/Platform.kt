@@ -28,6 +28,12 @@ sealed interface ContactSearch {
 /** Recherche dans le répertoire par début de saisie (gère la demande de permission). */
 interface ContactsProvider {
     suspend fun search(query: String): ContactSearch
+
+    /** `true` si la plateforme sait ouvrir son sélecteur de contacts (recherche et choix du bon numéro). */
+    val canPick: Boolean get() = false
+
+    /** Ouvre le sélecteur de contacts du système et renvoie la personne et le numéro choisis ; `null` si annulé. */
+    suspend fun pick(): PhoneContact? = null
 }
 
 /** Actions propres à la plateforme. */
@@ -45,6 +51,12 @@ interface PlatformActions {
 
     /** Ouvre un lien (`https:`, `tel:`, `mailto:`) dans l'appli du système qui le gère. */
     fun openLink(url: String)
+
+    /**
+     * Ouvre la feuille de partage du système avec ce fichier (WhatsApp, messagerie, e-mail…). Renvoie `false` si la
+     * plateforme ne sait pas le faire : l'appli propose alors d'enregistrer le fichier.
+     */
+    fun shareFile(name: String, mimeType: String, bytes: ByteArray): Boolean = false
 
     /** Langue du système (code ISO 639, par ex. « fr »). */
     fun systemLanguage(): String

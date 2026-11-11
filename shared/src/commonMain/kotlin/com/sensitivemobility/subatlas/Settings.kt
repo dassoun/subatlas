@@ -29,7 +29,13 @@ data class Settings(
     val kindColors: Map<String, Int> = emptyMap(),
     /** Seuils et couleurs de la courbe selon la vitesse de remontée. */
     val ascent: AscentScale = AscentScale(),
+    /** Courbes affichées en plus de la profondeur sur le graphique d'une plongée. */
+    val chartSeries: Set<ChartSeries> = setOf(ChartSeries.PRESSURE),
 )
+
+/** Courbes que le graphique d'une plongée peut superposer à la profondeur (quand l'ordinateur les a enregistrées). */
+@Serializable
+enum class ChartSeries { PRESSURE, NDL, DECO, CNS, PPO2 }
 
 /**
  * Seuils de vitesse de remontée (m/min) au-delà desquels le tronçon de courbe change de couleur, et couleur de chacun

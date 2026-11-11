@@ -44,5 +44,16 @@
                 <data android:mimeType="application/*" />
             </intent-filter>
         </activity>
+
+        <!-- Partage d'un fichier de plongée : le fichier temporaire du cache est exposé le temps de l'envoi -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

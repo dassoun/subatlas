@@ -35,9 +35,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,6 +52,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ButtonDefaults
@@ -58,7 +66,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -138,6 +145,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val current = stack.last()
 
     fun push(s: Screen) { stack.add(s) }
+    /** Remplace la fiche affichée (passage à la fiche voisine) : « retour » ramène toujours à la liste. */
+    fun replaceTop(s: Screen) { stack[stack.lastIndex] = s }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     fun goTab(s: Screen) { stack.clear(); stack.add(s) }
 
@@ -148,6 +157,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var notice by remember { mutableStateOf<String?>(null) }
     var sharedIncoming by remember { mutableStateOf<SharedDive?>(null) }
     var incomingPlan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var incomingDiveFile by remember { mutableStateOf<DiveFile?>(null) }
     var incomingSkipped by remember { mutableStateOf(0) }
     var incomingReading by remember { mutableStateOf(false) }
 
@@ -169,6 +179,12 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             // tourne donc dans le scope de la composition, que ce changement de clé ne touche pas.
             IncomingFile.pending = null
             scope.launch {
+                // Un fichier de plongée envoyé par un binôme (JSON) : on l'ajoute après confirmation.
+                val diveFile = withContext(Dispatchers.Default) { DiveFileCodec.decode(incomingFile) }
+                if (diveFile != null) {
+                    incomingDiveFile = diveFile
+                    return@launch
+                }
                 try {
                     incomingReading = true
                     val file = try {
@@ -213,13 +229,18 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
         }
     }
 
-    SubAtlasTheme(state.settings.theme, strings, state.settings.ascent) {
+    SubAtlasTheme(
+        state.settings.theme, strings, state.settings.ascent, state.settings.chartSeries,
+        onToggleSeries = { series ->
+            state.updateSettings { it.copy(chartSeries = if (series in it.chartSeries) it.chartSeries - series else it.chartSeries + series) }
+        },
+    ) {
         when (current) {
             Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Safety, Screen.Settings -> Scaffold(
                 topBar = {
                     Bar(
                         when (current) {
-                            Screen.Dives -> strings.divesTitle
+                            Screen.Dives -> if (state.dives.isEmpty()) strings.divesTitle else "${strings.divesTitle} (${state.dives.size})"
                             Screen.Sites -> strings.sitesTitle
                             Screen.Centers -> strings.centersTitle
                             Screen.Checklists -> strings.checklistsTitle
@@ -299,7 +320,16 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             is Screen.DiveDetail -> {
                 val dive = state.dive(current.id)
                 val diveSite = dive?.let { state.site(it.siteId) }
-                if (dive == null) pop() else Scaffold(topBar = { Bar(diveSite?.name ?: strings.divesTitle, ::pop) }) { pad ->
+                val diveIds = state.dives.sortedWith(diveOrder).map { it.id } // plus récente d'abord
+                val di = diveIds.indexOf(current.id)
+                // Glissé à droite : plongée suivante (plus récente) ; à gauche : précédente (plus ancienne).
+                if (dive == null) pop() else Scaffold(
+                    modifier = Modifier.swipeNeighbours(
+                        onRight = diveIds.getOrNull(di - 1)?.let { { replaceTop(Screen.DiveDetail(it)) } },
+                        onLeft = diveIds.getOrNull(di + 1)?.let { { replaceTop(Screen.DiveDetail(it)) } },
+                    ),
+                    topBar = { Bar(strings.dateText(dive.date), ::pop, leading = "#${state.diveNumber(dive.id)}", trailing = dive.startTime) },
+                ) { pad ->
                     DiveDetailView(
                         dive, state, pad, actions,
                         onEdit = { push(Screen.DiveForm(dive.id, null)) },
@@ -317,15 +347,46 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 }
             }
 
-            is Screen.DiveForm -> Scaffold(
-                topBar = { Bar(if (current.id == null) strings.newDive else strings.editDive, ::pop) },
-            ) { pad ->
-                DiveForm(state, current.id?.let(state::dive), current.siteId, location, actions, contacts, pad) { pop() }
+            is Screen.DiveForm -> {
+                // Comme en consultation : glissé à droite = plongée suivante, à gauche = précédente (modification d'une plongée existante).
+                val diveIds = state.dives.sortedWith(diveOrder).map { it.id }
+                val di = current.id?.let { diveIds.indexOf(it) } ?: -1
+                // Demande de changement de plongée : le formulaire propose d'enregistrer avant d'y aller s'il a été modifié.
+                var formGo by remember { mutableStateOf<Long?>(null) }
+                fun goTo(id: Long) {
+                    // Le retour revient à la fiche de la plongée affichée, pas à celle d'où l'on est parti.
+                    val below = stack.lastIndex - 1
+                    if (below >= 0 && stack[below] is Screen.DiveDetail) stack[below] = Screen.DiveDetail(id)
+                    replaceTop(Screen.DiveForm(id, null))
+                }
+                Scaffold(
+                    modifier = if (di < 0) Modifier else Modifier.swipeNeighbours(
+                        onRight = diveIds.getOrNull(di - 1)?.let { { formGo = it } },
+                        onLeft = diveIds.getOrNull(di + 1)?.let { { formGo = it } },
+                    ),
+                    topBar = { Bar(if (current.id == null) strings.newDive else "${strings.editDive} · #${state.diveNumber(current.id)}", ::pop) },
+                ) { pad ->
+                    // La clé repart d'un formulaire neuf pour chaque plongée.
+                    key(current.id) {
+                        DiveForm(
+                            state, current.id?.let(state::dive), current.siteId, location, actions, contacts, pad,
+                            goRequest = formGo, onGo = ::goTo, onGoHandled = { formGo = null },
+                        ) { pop() }
+                    }
+                }
             }
 
             is Screen.SiteDetail -> {
                 val site = state.site(current.id)
-                if (site == null) pop() else Scaffold(topBar = { Bar(site.name, ::pop) }) { pad ->
+                val siteIds = state.sites.sortedBy { it.name.lowercase() }.map { it.id }
+                val si = siteIds.indexOf(current.id)
+                if (site == null) pop() else Scaffold(
+                    modifier = Modifier.swipeNeighbours(
+                        onRight = siteIds.getOrNull(si + 1)?.let { { replaceTop(Screen.SiteDetail(it)) } },
+                        onLeft = siteIds.getOrNull(si - 1)?.let { { replaceTop(Screen.SiteDetail(it)) } },
+                    ),
+                    topBar = { Bar(site.name, ::pop) },
+                ) { pad ->
                     SiteDetailView(
                         site, state.divesAt(site.id), pad, actions,
                         onEdit = { push(Screen.SiteForm(site.id)) },
@@ -344,7 +405,15 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
 
             is Screen.CenterDetail -> {
                 val center = state.center(current.id)
-                if (center == null) pop() else Scaffold(topBar = { Bar(center.name, ::pop) }) { pad ->
+                val centerIds = state.centers.sortedBy { it.name.lowercase() }.map { it.id }
+                val ci = centerIds.indexOf(current.id)
+                if (center == null) pop() else Scaffold(
+                    modifier = Modifier.swipeNeighbours(
+                        onRight = centerIds.getOrNull(ci + 1)?.let { { replaceTop(Screen.CenterDetail(it)) } },
+                        onLeft = centerIds.getOrNull(ci - 1)?.let { { replaceTop(Screen.CenterDetail(it)) } },
+                    ),
+                    topBar = { Bar(center.name, ::pop) },
+                ) { pad ->
                     CenterDetailView(
                         center, pad, actions,
                         onEdit = { push(Screen.CenterForm(center.id)) },
@@ -381,6 +450,17 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 onDismiss = { incomingPlan = null },
             )
         }
+        incomingDiveFile?.let { file ->
+            SharedDiveDialog(
+                file.summary(),
+                onAdd = {
+                    val id = state.addDiveFile(file)
+                    incomingDiveFile = null
+                    push(Screen.DiveDetail(id))
+                },
+                onDismiss = { incomingDiveFile = null },
+            )
+        }
         sharedIncoming?.let { shared ->
             SharedDiveDialog(
                 shared,
@@ -412,9 +492,20 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Bar(title: String, onBack: (() -> Unit)?) {
+private fun Bar(title: String, onBack: (() -> Unit)?, leading: String? = null, trailing: String? = null) {
     TopAppBar(
-        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = {
+            if (leading == null && trailing == null) {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                // Trois zones : un texte à gauche, le titre au centre, un texte à droite (numéro · date · heure de début).
+                Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(leading.orEmpty(), Modifier.weight(1f), maxLines = 1)
+                    Text(title, maxLines = 1)
+                    Text(trailing.orEmpty(), Modifier.weight(1f), maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                }
+            }
+        },
         navigationIcon = { if (onBack != null) BackArrow(onBack) },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.inverseSurface,
@@ -449,8 +540,17 @@ private fun ImportDialog(data: ImportData, onMerge: () -> Unit, onReplace: () ->
 @Composable
 private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> Unit, onImport: () -> Unit) {
     val s = LocalStrings.current
+    val scroll = rememberScrollState()
+    var advanced by remember { mutableStateOf(false) }
+    // En dépliant « Avancé », la page défile en douceur jusqu'au nouveau contenu.
+    LaunchedEffect(advanced) {
+        if (advanced) {
+            withFrameNanos { } // laisse le contenu se mesurer pour que le défilement connaisse la nouvelle fin
+            scroll.animateScrollTo(scroll.maxValue, tween(450))
+        }
+    }
     Column(
-        Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
+        Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SectionTitle(s.themeSection)
@@ -509,6 +609,46 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
         Text(s.dataHint, style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text(s.exportData) }
         OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text(s.importData) }
+
+        // Section repliée par défaut : les actions dangereuses ne sont pas à portée d'un appui distrait.
+        var confirmDelete by remember { mutableStateOf(false) }
+        Row(
+            Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f)) { SectionTitle(s.advancedSection) }
+            Text(if (advanced) "▴" else "▾", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        if (advanced) {
+            Text(s.deleteAllDivesHint, style = MaterialTheme.typography.bodyMedium)
+            Button(
+                onClick = { confirmDelete = true },
+                enabled = state.dives.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) { Text("⚠️ " + s.deleteAllDives) }
+        }
+        if (confirmDelete) {
+            AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                icon = { Text("⚠️", fontSize = 32.sp) },
+                title = { Text(s.deleteAllTitle, color = MaterialTheme.colorScheme.error) },
+                text = { Text(s.deleteAllMessage(state.dives.size)) },
+                confirmButton = {
+                    Button(
+                        onClick = { state.deleteAllDives(); confirmDelete = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) { Text(s.deleteAllConfirm) }
+                },
+                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel) } },
+            )
+        }
     }
 }
 
@@ -1059,4 +1199,43 @@ private fun TextPromptDialog(
         confirmButton = { TextButton(enabled = text.isNotBlank(), onClick = { onOk(text.trim().replaceFirstChar { it.uppercase() }) }) { Text(s.ok) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
     )
+}
+
+/**
+ * Glissé horizontal d'une fiche vers la fiche voisine : la fiche suit le doigt, puis sort de l'écran pendant que la
+ * voisine entre de l'autre côté. Les éléments qui gèrent eux-mêmes le glissé (courbe de plongée, cartes défilantes) le
+ * consomment avant : seul un glissé ailleurs change de fiche. Sans voisine d'un côté, la fiche résiste puis revient.
+ */
+@Composable
+private fun Modifier.swipeNeighbours(onRight: (() -> Unit)?, onLeft: (() -> Unit)?): Modifier {
+    val threshold = with(LocalDensity.current) { 90.dp.toPx() }
+    val offset = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var width by remember { mutableStateOf(1f) }
+    return this
+        .onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }
+        .graphicsLayer { translationX = offset.value }
+        .pointerInput(onRight, onLeft) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    val o = offset.value
+                    val go = if (o > threshold) onRight else if (o < -threshold) onLeft else null
+                    scope.launch {
+                        if (go != null) {
+                            val dir = if (o > 0) 1f else -1f
+                            offset.animateTo(dir * width, tween(140))
+                            go()
+                            offset.snapTo(-dir * width)
+                            offset.animateTo(0f, tween(200))
+                        } else offset.animateTo(0f, tween(180))
+                    }
+                },
+                onDragCancel = { scope.launch { offset.animateTo(0f, tween(180)) } },
+                onHorizontalDrag = { _, delta ->
+                    val next = offset.value + delta
+                    val blocked = (next > 0 && onRight == null) || (next < 0 && onLeft == null)
+                    scope.launch { offset.snapTo(offset.value + if (blocked) delta / 4 else delta) }
+                },
+            )
+        }
 }
