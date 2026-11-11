@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -758,6 +759,9 @@ internal fun DiveForm(
     val here = position as? LocationResult.Success
 
     var siteMenu by remember { mutableStateOf(false) }
+    var siteQuery by remember { mutableStateOf("") }
+    var siteEditing by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var creatingSite by remember { mutableStateOf(false) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingTime by remember { mutableStateOf<Boolean?>(null) } // true : début, false : fin
@@ -859,22 +863,38 @@ internal fun DiveForm(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // --- Site
+        // Champ de saisie : le texte tapé filtre la liste des sites (nom ou pays).
+        val query = siteQuery.trim()
+        val shownSites = if (query.isEmpty()) sortedSites else sortedSites.filter {
+            it.fullName().contains(query, ignoreCase = true) || it.name.contains(query, ignoreCase = true)
+        }
         ExposedDropdownMenuBox(expanded = siteMenu, onExpandedChange = { siteMenu = it }) {
             OutlinedTextField(
-                value = selectedSite?.fullName() ?: "",
-                onValueChange = {},
-                readOnly = true,
+                // Au repos : le site choisi. Pendant la saisie : le texte tapé, le site choisi passe en indication.
+                value = if (siteEditing) siteQuery else selectedSite?.fullName() ?: "",
+                onValueChange = { siteQuery = it; siteEditing = true; siteMenu = true },
+                singleLine = true,
                 label = { Text(s.diveSite) },
-                placeholder = { Text(s.chooseSite) },
+                placeholder = { Text(selectedSite?.fullName() ?: s.chooseSite) },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(siteMenu) },
-                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                modifier = Modifier
+                    .menuAnchor(MenuAnchorType.PrimaryEditable)
+                    .fillMaxWidth()
+                    .onFocusChanged { f ->
+                        if (f.isFocused) {
+                            if (!siteEditing) { siteQuery = ""; siteEditing = true }
+                        } else if (siteEditing) {
+                            siteEditing = false
+                            siteQuery = ""
+                        }
+                    },
             )
             ExposedDropdownMenu(expanded = siteMenu, onDismissRequest = { siteMenu = false }) {
                 DropdownMenuItem(
                     text = { Text(s.createSite, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
                     onClick = { siteMenu = false; creatingSite = true },
                 )
-                sortedSites.forEach { site ->
+                shownSites.forEach { site ->
                     DropdownMenuItem(
                         text = {
                             Column {
@@ -891,7 +911,7 @@ internal fun DiveForm(
                                 if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall)
                             }
                         },
-                        onClick = { siteId = site.id; siteMenu = false; attachPosition = false },
+                        onClick = { siteId = site.id; siteMenu = false; attachPosition = false; siteEditing = false; siteQuery = ""; focus.clearFocus() },
                     )
                 }
             }
