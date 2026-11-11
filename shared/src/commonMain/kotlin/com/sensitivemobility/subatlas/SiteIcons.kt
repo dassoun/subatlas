@@ -34,7 +34,7 @@ internal fun DiveSite.countryText(): String =
 
 /** Ligne « 🇫🇷 France · [pictogramme du type] Nom du site ». */
 @Composable
-internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Modifier, maxLines: Int = 2) {
+internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Modifier, maxLines: Int = 2, showGps: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (site.country.isNotBlank()) Text(site.countryText() + " · ", style = style, maxLines = 1)
         site.type?.let {
@@ -42,6 +42,8 @@ internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Mod
             Spacer(Modifier.width(4.dp))
         }
         Text(site.name, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        // Épingle quand le site a une position GPS.
+        if (showGps && site.latitude != null && site.longitude != null) Text(" \uD83D\uDCCD", style = style, maxLines = 1)
     }
 }
 

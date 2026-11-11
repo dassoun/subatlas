@@ -158,6 +158,8 @@ internal fun DiveList(
     val scope = rememberCoroutineScope()
     var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
     var planSkipped by remember { mutableStateOf(0) }
+    var siteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
+    var attachSimilar by remember { mutableStateOf(true) }
     var reading by remember { mutableStateOf(false) }
     var mergeAsk by remember { mutableStateOf<Pair<Dive, Dive>?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -178,7 +180,10 @@ internal fun DiveList(
                     message = s.shearwaterNone
                 } else {
                     planSkipped = file.skipped
-                    plan = state.planShearwaterImport(file.dives)
+                    val newPlan = state.planShearwaterImport(file.dives)
+                    siteMatches = state.similarSiteMatches(newPlan)
+                    attachSimilar = true
+                    plan = newPlan
                 }
             } catch (e: ShearwaterImport.NotShearwaterException) {
                 message = s.shearwaterInvalid
@@ -232,7 +237,7 @@ internal fun DiveList(
                     Row(Modifier.height(IntrinsicSize.Min).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(Modifier.weight(1.4f)) {
                             val previous = if (dive.noMerge) null else state.mergeCandidate(dive)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text("#${numbers[dive.id]} · " + s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
                                 if (previous != null) {
                                     Spacer(Modifier.width(10.dp))
@@ -240,6 +245,12 @@ internal fun DiveList(
                                         onMerge = { mergeAsk = previous to dive },
                                         onNoMerge = { state.setNoMerge(dive.id) },
                                     )
+                                }
+                                // Globe à droite de la ligne (avant la courbe, jamais dessus) quand le site a une position GPS.
+                                val gpsSite = state.site(dive.siteId)
+                                if (gpsSite?.latitude != null && gpsSite.longitude != null) {
+                                    Spacer(Modifier.weight(1f))
+                                    Text("\uD83C\uDF10", style = MaterialTheme.typography.titleMedium)
                                 }
                             }
                             val diveSite = state.site(dive.siteId)
@@ -265,8 +276,11 @@ internal fun DiveList(
         ShearwaterPlanDialog(
             items,
             planSkipped,
+            siteMatches = siteMatches,
+            attachSimilar = attachSimilar,
+            onAttachChange = { attachSimilar = it },
             onConfirm = {
-                val (created, merged) = state.applyShearwaterImport(items)
+                val (created, merged) = state.applyShearwaterImport(items, attachSimilar)
                 plan = null
                 message = s.shearwaterDone(created, merged)
             },
@@ -317,7 +331,15 @@ internal fun AppState.diveNumber(id: Long): Int = dives.sortedWith(diveOrder).re
 
 /** Aperçu de l'import : ce qui sera ajouté et ce qui sera fusionné avec une plongée du carnet. */
 @Composable
-internal fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, skipped: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun ShearwaterPlanDialog(
+    items: List<ShearwaterPlanItem>,
+    skipped: Int,
+    siteMatches: List<Pair<String, DiveSite>>,
+    attachSimilar: Boolean,
+    onAttachChange: (Boolean) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val s = LocalStrings.current
     // Les plongées déjà créées ou fusionnées à partir de cet export ne sont pas refaites : elles sont repliées sous un résumé.
     val (present, todo) = items.partition { it.alreadyDone }
@@ -347,6 +369,19 @@ internal fun ShearwaterPlanDialog(items: List<ShearwaterPlanItem>, skipped: Int,
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (todo.isNotEmpty()) Text(s.shearwaterFound(todo.size, todo.size - merged, merged))
+                // Sites de l'export au nom proche d'un site du carnet : rattachés à celui-ci si l'utilisateur le confirme.
+                if (siteMatches.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onAttachChange(!attachSimilar) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(attachSimilar, { onAttachChange(it) })
+                        Text(s.importAttachSimilar(siteMatches.size), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    siteMatches.forEach { (from, site) ->
+                        Text("\u00ab $from \u00bb \u2192 \u00ab ${site.name} \u00bb", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 // Toutes les plongées à traiter sont listées.
                 // Les nouvelles plongées d'abord, puis les fusions (dans chaque groupe, la plus récente en premier).
                 todo.sortedBy { it.mergeInto != null }.forEach { item ->

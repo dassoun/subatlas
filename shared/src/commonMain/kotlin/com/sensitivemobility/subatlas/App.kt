@@ -105,6 +105,7 @@ private sealed interface Screen {
     data object Safety : Screen
     data class SafetyDetail(val id: String) : Screen
     data object Settings : Screen
+    data object SiteDuplicates : Screen
     data class DiveDetail(val id: Long) : Screen
     data class DiveForm(val id: Long?, val siteId: Long?) : Screen
     data class SiteDetail(val id: Long) : Screen
@@ -159,6 +160,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var incomingPlan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
     var incomingDiveFile by remember { mutableStateOf<DiveFile?>(null) }
     var incomingSkipped by remember { mutableStateOf(0) }
+    var incomingSiteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
+    var incomingAttach by remember { mutableStateOf(true) }
     var incomingReading by remember { mutableStateOf(false) }
 
     // Lien de plongée ouvert depuis un message (ou collé) : on propose de l'ajouter au carnet.
@@ -196,7 +199,10 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         notice = strings.shearwaterNone
                     } else {
                         incomingSkipped = file.skipped
-                        incomingPlan = state.planShearwaterImport(file.dives)
+                        val newPlan = state.planShearwaterImport(file.dives)
+                        incomingSiteMatches = state.similarSiteMatches(newPlan)
+                        incomingAttach = true
+                        incomingPlan = newPlan
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -308,7 +314,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             listState = divesListState,
                         )
                     Screen.Sites ->
-                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, listState = sitesListState)
+                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, onDuplicates = { push(Screen.SiteDuplicates) }, listState = sitesListState)
                     Screen.Centers ->
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
@@ -380,6 +386,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 val site = state.site(current.id)
                 val siteIds = state.sites.sortedBy { it.name.lowercase() }.map { it.id }
                 val si = siteIds.indexOf(current.id)
+                var mergePick by remember(current.id) { mutableStateOf(false) }
+                var mergeWith by remember(current.id) { mutableStateOf<DiveSite?>(null) }
                 if (site == null) pop() else Scaffold(
                     modifier = Modifier.swipeNeighbours(
                         onRight = siteIds.getOrNull(si + 1)?.let { { replaceTop(Screen.SiteDetail(it)) } },
@@ -391,16 +399,31 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         site, state.divesAt(site.id), pad, actions,
                         onEdit = { push(Screen.SiteForm(site.id)) },
                         onDelete = { state.deleteSite(site.id); pop() },
+                        onMerge = { mergePick = true },
                         onAddDive = { push(Screen.DiveForm(null, site.id)) },
                         onOpenDive = { push(Screen.DiveDetail(it)) },
                     )
+                    if (mergePick) {
+                        PickSiteToMergeDialog(state, site, onPick = { mergePick = false; mergeWith = it }, onDismiss = { mergePick = false })
+                    }
+                    mergeWith?.let { other ->
+                        ConfirmMergeDialog(
+                            state, site, listOf(other), onExport = { startExport() },
+                            onConfirm = { state.mergeSites(site.id, setOf(other.id)); mergeWith = null },
+                            onDismiss = { mergeWith = null },
+                        )
+                    }
                 }
+            }
+
+            Screen.SiteDuplicates -> Scaffold(topBar = { Bar(strings.duplicatesTitle, ::pop) }) { pad ->
+                SiteDuplicatesScreen(state, pad, onExport = { startExport() })
             }
 
             is Screen.SiteForm -> Scaffold(
                 topBar = { Bar(if (current.id == null) strings.newSite else strings.editSite, ::pop) },
             ) { pad ->
-                SiteForm(state, current.id?.let(state::site), location, pad) { pop() }
+                SiteForm(state, current.id?.let(state::site), location, actions, pad) { pop() }
             }
 
             is Screen.CenterDetail -> {
@@ -441,8 +464,11 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             ShearwaterPlanDialog(
                 items,
                 incomingSkipped,
+                siteMatches = incomingSiteMatches,
+                attachSimilar = incomingAttach,
+                onAttachChange = { incomingAttach = it },
                 onConfirm = {
-                    val (created, merged) = state.applyShearwaterImport(items)
+                    val (created, merged) = state.applyShearwaterImport(items, incomingAttach)
                     incomingPlan = null
                     goTab(Screen.Dives)
                     notice = strings.shearwaterDone(created, merged)
@@ -612,6 +638,8 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
 
         // Section repliée par défaut : les actions dangereuses ne sont pas à portée d'un appui distrait.
         var confirmDelete by remember { mutableStateOf(false) }
+        // Nombre de plongées effacées, affiché une fois l'opération terminée.
+        var deletedCount by remember { mutableStateOf<Int?>(null) }
         Row(
             Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -639,7 +667,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
                 text = { Text(s.deleteAllMessage(state.dives.size)) },
                 confirmButton = {
                     Button(
-                        onClick = { state.deleteAllDives(); confirmDelete = false },
+                        onClick = { deletedCount = state.dives.size; state.deleteAllDives(); confirmDelete = false },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.error,
                             contentColor = MaterialTheme.colorScheme.onError,
@@ -647,6 +675,15 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
                     ) { Text(s.deleteAllConfirm) }
                 },
                 dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel) } },
+            )
+        }
+        deletedCount?.let { n ->
+            AlertDialog(
+                onDismissRequest = { deletedCount = null },
+                icon = { Text("\u2705", fontSize = 32.sp) },
+                title = { Text(s.deleteAllDoneTitle) },
+                text = { Text(s.deleteAllDone(n)) },
+                confirmButton = { TextButton(onClick = { deletedCount = null }) { Text(s.ok) } },
             )
         }
     }
@@ -730,8 +767,9 @@ private fun BackArrow(onClick: () -> Unit) {
 // ---------------------------------------------------------------- Sites
 
 @Composable
-private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, listState: LazyListState) {
+private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, onDuplicates: () -> Unit, listState: LazyListState) {
     val s = LocalStrings.current
+    val duplicateCount = remember(state.sites.toList(), state.settings.distinctSites) { state.siteDuplicateGroups().size }
     Column(Modifier.fillMaxSize().padding(pad)) {
         if (state.sites.isEmpty()) {
             Text(
@@ -775,6 +813,11 @@ private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit
                 }
             }
         }
+        if (duplicateCount > 0) {
+            OutlinedButton(onClick = onDuplicates, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+                Text(s.duplicatesButton(duplicateCount))
+            }
+        }
         Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Text(s.addSite) }
     }
 }
@@ -787,6 +830,7 @@ private fun SiteDetailView(
     actions: PlatformActions,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onMerge: () -> Unit,
     onAddDive: () -> Unit,
     onOpenDive: (Long) -> Unit,
 ) {
@@ -815,6 +859,7 @@ private fun SiteDetailView(
         }
         SiteDivesSection(dives, onOpenDive)
         OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text(s.edit) }
+        OutlinedButton(onClick = onMerge, modifier = Modifier.fillMaxWidth()) { Text(s.mergeWithOther) }
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
     }
     if (confirm) {
@@ -831,10 +876,17 @@ private fun SiteForm(
     state: AppState,
     existing: DiveSite?,
     location: LocationProvider,
+    actions: PlatformActions,
     pad: PaddingValues,
     onDone: () -> Unit,
 ) {
     val s = LocalStrings.current
+    val scope = rememberCoroutineScope()
+    // Recherche des coordonnées par nom : null = pas de recherche ; sinon l'état de la fenêtre de résultats.
+    var searching by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf<List<PlaceResult>?>(null) }
+    var searchFailed by remember { mutableStateOf(false) }
+    var showResults by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var lat by remember { mutableStateOf(existing?.latitude?.toString() ?: "") }
     var lon by remember { mutableStateOf(existing?.longitude?.toString() ?: "") }
@@ -863,6 +915,24 @@ private fun SiteForm(
         Text(s.siteTypeLabel, style = MaterialTheme.typography.labelLarge)
         SiteTypeChips(siteType) { siteType = it }
         GpsFields(lat, lon, { lat = it }, { lon = it }, location)
+        OutlinedButton(
+            enabled = name.isNotBlank() && !searching,
+            onClick = {
+                searching = true
+                searchFailed = false
+                found = null
+                showResults = true
+                scope.launch {
+                    // Le nom, avec le pays s'il est renseigné, pour départager les homonymes.
+                    val query = listOf(name.trim(), country.trim()).filter { it.isNotEmpty() }.joinToString(", ")
+                    val result = searchPlaces(actions, query, actions.systemLanguage())
+                    searchFailed = result == null
+                    found = result
+                    searching = false
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("\uD83D\uDD0E  " + s.findCoords) }
         Text(s.positionOptionalHint, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
             depth, { depth = it.filter(Char::isDigit) }, label = { Text(s.maxDepthField) }, singleLine = true,
@@ -898,6 +968,45 @@ private fun SiteForm(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(s.save) }
+    }
+    if (showResults) {
+        AlertDialog(
+            onDismissRequest = { showResults = false },
+            title = { Text(s.findCoordsTitle) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val list = found
+                    when {
+                        searching -> Text(s.findCoordsSearching)
+                        searchFailed -> Text(s.findCoordsFailed, color = StatusKo)
+                        list.isNullOrEmpty() -> Text(s.findCoordsNone)
+                        else -> list.forEach { place ->
+                            Card(
+                                onClick = {
+                                    lat = round5(place.latitude)
+                                    lon = round5(place.longitude)
+                                    showResults = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(place.title, style = MaterialTheme.typography.titleSmall)
+                                    if (place.detail.isNotEmpty()) Text(place.detail, style = MaterialTheme.typography.bodySmall)
+                                    Text(
+                                        formatCoords(place.latitude, place.longitude),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Text(s.findCoordsCredit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showResults = false }) { Text(s.cancel) } },
+        )
     }
 }
 

@@ -85,6 +85,21 @@ class AndroidPlatformActions(
         runCatching { context.startActivity(chooser) }
     }
 
+    override suspend fun httpGet(url: String, userAgent: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 15_000
+                connection.setRequestProperty("User-Agent", userAgent)
+                connection.setRequestProperty("Accept", "application/json")
+                if (connection.responseCode == 200) connection.inputStream.use { it.readBytes().decodeToString() } else null
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrNull()
+    }
+
     override suspend fun openFileBytes(): ByteArray? {
         val uri = pickOpenUri() ?: return null
         return withContext(Dispatchers.IO) {

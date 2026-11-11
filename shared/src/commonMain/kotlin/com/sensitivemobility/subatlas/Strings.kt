@@ -144,6 +144,8 @@ interface Strings {
     val deleteAllTitle: String
     fun deleteAllMessage(count: Int): String
     val deleteAllConfirm: String
+    val deleteAllDoneTitle: String
+    fun deleteAllDone(count: Int): String
     fun shearwaterSkipped(count: Int): String
     val shearwaterReading: String
     val computerLabel: String
@@ -218,6 +220,27 @@ interface Strings {
     val sacLabel: String
     val conditionsSection: String
     val notesLabel: String
+    val findCoords: String
+    val findCoordsTitle: String
+    val findCoordsSearching: String
+    val findCoordsNone: String
+    val findCoordsFailed: String
+    val findCoordsCredit: String
+    fun duplicatesButton(count: Int): String
+    val duplicatesTitle: String
+    val duplicatesNone: String
+    val duplicatesHelp: String
+    val mergeKeepHint: String
+    fun mergeSitesAction(count: Int): String
+    val notDuplicates: String
+    val mergeSitesTitle: String
+    fun mergeSitesMessage(keeper: String, removed: Int, dives: Int): String
+    val mergeExportFirst: String
+    val mergeSitesConfirm: String
+    val mergeWithOther: String
+    val mergePickTitle: String
+    fun mergePickHelp(keeper: String): String
+    fun importAttachSimilar(count: Int): String
     val pressureLabel: String
     val consumedLabel: String
     val waterTemp: String
@@ -458,6 +481,8 @@ object FrStrings : Strings {
     override fun deleteAllMessage(count: Int) =
         "Les $count plongée${if (count > 1) "s" else ""} du carnet (courbes, bouteilles, notes…) seront supprimées définitivement. Cette opération est IRRÉVERSIBLE : il n'y a ni corbeille ni annulation. Pense à exporter tes données avant."
     override val deleteAllConfirm = "Tout effacer"
+    override val deleteAllDoneTitle = "Plongées effacées"
+    override fun deleteAllDone(count: Int) = "Les $count plongée${if (count > 1) "s" else ""} ${if (count > 1) "ont" else "a"} été effacée${if (count > 1) "s" else ""}."
     override fun shearwaterPresent(count: Int) = "$count plongée${if (count > 1) "s" else ""} déjà créée${if (count > 1) "s" else ""} / fusionnée${if (count > 1) "s" else ""}"
     override fun shearwaterSkipped(count: Int) = "$count plongée${if (count > 1) "s" else ""} du fichier illisible${if (count > 1) "s" else ""}, ignorée${if (count > 1) "s" else ""}."
     override val shearwaterReading = "Lecture du fichier…"
@@ -534,6 +559,30 @@ object FrStrings : Strings {
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions et matériel"
     override val notesLabel = "Notes"
+    override val findCoords = "Rechercher les coordonnées"
+    override val findCoordsTitle = "Choisis le bon lieu"
+    override val findCoordsSearching = "Recherche en cours…"
+    override val findCoordsNone = "Aucun résultat. Essaie un nom plus court ou sans accent, ou ajoute le pays."
+    override val findCoordsFailed = "Recherche impossible : vérifie ta connexion internet et réessaie."
+    override val findCoordsCredit = "Données © contributeurs OpenStreetMap"
+    override fun duplicatesButton(count: Int) = "Sites en double ($count)"
+    override val duplicatesTitle = "Sites en double"
+    override val duplicatesNone = "Aucun doublon probable."
+    override val duplicatesHelp = "Ces sites ont des noms proches. Choisis celui à conserver : les plongées des autres lui seront rattachées, puis les autres seront supprimés."
+    override val mergeKeepHint = "Touche un site pour le conserver. Décoche ceux qui ne sont pas des doublons."
+    override fun mergeSitesAction(count: Int) = "Fusionner ces $count sites"
+    override val notDuplicates = "Ce ne sont pas des doublons"
+    override val mergeSitesTitle = "Fusionner les sites ?"
+    override fun mergeSitesMessage(keeper: String, removed: Int, dives: Int) =
+        "« $keeper » est conservé.\n\nPlongées rattachées : $dives\nSites supprimés : $removed\n\n" +
+            "Ce qui manque au site conservé (position, pays, type, notes) est complété avec les autres. " +
+            "Cette opération est IRRÉVERSIBLE : pense à exporter tes données avant."
+    override val mergeExportFirst = "Exporter d'abord"
+    override val mergeSitesConfirm = "Fusionner"
+    override val mergeWithOther = "Fusionner avec un autre site…"
+    override val mergePickTitle = "Fusionner avec quel site ?"
+    override fun mergePickHelp(keeper: String) = "Le site choisi sera supprimé et ses plongées rattachées à « $keeper »."
+    override fun importAttachSimilar(count: Int) = "Rattacher $count site${if (count > 1) "s" else ""} à un site existant au nom proche"
     override val pressureLabel = "Pression"
     override val consumedLabel = "Consommé"
     override val waterTemp = "Température de l'eau"
@@ -856,6 +905,8 @@ object EnStrings : Strings {
     override fun deleteAllMessage(count: Int) =
         "The $count dive${if (count != 1) "s" else ""} in the logbook (profiles, tanks, notes…) will be permanently deleted. This CANNOT be undone: there is no trash and no undo. Consider exporting your data first."
     override val deleteAllConfirm = "Delete everything"
+    override val deleteAllDoneTitle = "Dives deleted"
+    override fun deleteAllDone(count: Int) = "$count dive${if (count != 1) "s" else ""} ${if (count != 1) "were" else "was"} deleted."
     override fun shearwaterPresent(count: Int) = "$count dive${if (count != 1) "s" else ""} already created / merged"
     override fun shearwaterSkipped(count: Int) = "$count unreadable dive${if (count != 1) "s" else ""} in the file skipped."
     override val shearwaterReading = "Reading the file…"
@@ -932,6 +983,30 @@ object EnStrings : Strings {
     override val sacLabel = "SAC"
     override val conditionsSection = "Conditions and gear"
     override val notesLabel = "Notes"
+    override val findCoords = "Find coordinates"
+    override val findCoordsTitle = "Pick the right place"
+    override val findCoordsSearching = "Searching…"
+    override val findCoordsNone = "No result. Try a shorter name, without accents, or add the country."
+    override val findCoordsFailed = "Search failed: check your internet connection and try again."
+    override val findCoordsCredit = "Data © OpenStreetMap contributors"
+    override fun duplicatesButton(count: Int) = "Duplicate sites ($count)"
+    override val duplicatesTitle = "Duplicate sites"
+    override val duplicatesNone = "No likely duplicates."
+    override val duplicatesHelp = "These sites have similar names. Pick the one to keep: the dives of the others are moved to it, then the others are deleted."
+    override val mergeKeepHint = "Tap a site to keep it. Untick the ones that are not duplicates."
+    override fun mergeSitesAction(count: Int) = "Merge these $count sites"
+    override val notDuplicates = "These are not duplicates"
+    override val mergeSitesTitle = "Merge the sites?"
+    override fun mergeSitesMessage(keeper: String, removed: Int, dives: Int) =
+        "\"$keeper\" is kept.\n\nDives moved: $dives\nSites deleted: $removed\n\n" +
+            "Whatever the kept site lacks (position, country, type, notes) is filled in from the others. " +
+            "This is IRREVERSIBLE: export your data first."
+    override val mergeExportFirst = "Export first"
+    override val mergeSitesConfirm = "Merge"
+    override val mergeWithOther = "Merge with another site…"
+    override val mergePickTitle = "Merge with which site?"
+    override fun mergePickHelp(keeper: String) = "The chosen site will be deleted and its dives moved to \"$keeper\"."
+    override fun importAttachSimilar(count: Int) = "Attach $count site${if (count > 1) "s" else ""} to an existing site with a similar name"
     override val pressureLabel = "Pressure"
     override val consumedLabel = "Used"
     override val waterTemp = "Water temperature"

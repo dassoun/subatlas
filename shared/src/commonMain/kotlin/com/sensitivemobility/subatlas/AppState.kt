@@ -139,6 +139,68 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         if (dives.removeAll { it.siteId == id }) saveDives()
     }
 
+    // --- Doublons de sites ---
+    /** Groupes de sites qui semblent n'en faire qu'un (noms proches, même pays), hors ceux déclarés distincts. */
+    fun siteDuplicateGroups(): List<List<DiveSite>> {
+        val list = sites.toList()
+        val parent = IntArray(list.size) { it }
+        fun find(i: Int): Int {
+            var x = i
+            while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }
+            return x
+        }
+        for (i in list.indices) for (j in i + 1 until list.size) {
+            if (sitePairKey(list[i].id, list[j].id) !in settings.distinctSites && likelySameSite(list[i], list[j])) {
+                parent[find(i)] = find(j)
+            }
+        }
+        return list.indices.groupBy { find(it) }.values
+            .filter { it.size >= 2 }
+            .map { idx -> idx.map { list[it] } }
+            .sortedBy { it.first().name.lowercase() }
+    }
+
+    /** Ces sites ne sont pas des doublons : on ne les reproposera plus. */
+    fun markDistinct(group: List<DiveSite>) {
+        val keys = buildSet { for (i in group.indices) for (j in i + 1 until group.size) add(sitePairKey(group[i].id, group[j].id)) }
+        updateSettings { it.copy(distinctSites = it.distinctSites + keys) }
+    }
+
+    /**
+     * Fusionne les sites [otherIds] dans [keeperId] : leurs plongées sont rattachées au site conservé, qui récupère ce qui
+     * lui manque (position, pays, type, profondeur, notes), puis ils sont supprimés. Renvoie le nombre de plongées rattachées.
+     */
+    fun mergeSites(keeperId: Long, otherIds: Set<Long>): Int {
+        var keeper = site(keeperId) ?: return 0
+        val others = otherIds.filter { it != keeperId }.mapNotNull(::site)
+        for (o in others) {
+            val needsPosition = keeper.latitude == null || keeper.longitude == null
+            keeper = keeper.copy(
+                latitude = if (needsPosition && o.latitude != null && o.longitude != null) o.latitude else keeper.latitude,
+                longitude = if (needsPosition && o.latitude != null && o.longitude != null) o.longitude else keeper.longitude,
+                maxDepthMeters = keeper.maxDepthMeters ?: o.maxDepthMeters,
+                country = keeper.country.ifBlank { o.country },
+                type = keeper.type ?: o.type,
+                notes = if (o.notes.isNotBlank() && !keeper.notes.contains(o.notes)) {
+                    if (keeper.notes.isBlank()) o.notes else keeper.notes + "\n" + o.notes
+                } else keeper.notes,
+            )
+        }
+        val gone = others.map { it.id }.toSet()
+        var moved = 0
+        for (i in dives.indices) {
+            if (dives[i].siteId in gone) {
+                dives[i] = dives[i].copy(siteId = keeperId)
+                moved++
+            }
+        }
+        sites.removeAll { it.id in gone }
+        saveSite(keeper, persist = false)
+        saveSites()
+        if (moved > 0) saveDives()
+        return moved
+    }
+
     // --- Import Shearwater ---
     /** Fenêtre de tolérance (en minutes) entre l'heure saisie dans le carnet et celle de l'ordinateur de plongée. */
     private val mergeWindowMinutes = 60
@@ -184,7 +246,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /** Applique l'import : renvoie (plongées créées, plongées fusionnées). */
-    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>): Pair<Int, Int> {
+    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>, attachSimilar: Boolean = true): Pair<Int, Int> {
         var created = 0
         var merged = 0
         for (item in plan) {
@@ -195,7 +257,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
                 saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
                 merged++
             } else {
-                saveDive(newDiveFrom(item.dive), persist = false)
+                saveDive(newDiveFrom(item.dive, attachSimilar), persist = false)
                 created++
             }
         }
@@ -205,22 +267,55 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         return created to merged
     }
 
-    private fun siteFor(sw: ShearwaterDive): DiveSite {
-        val name = sw.siteName.ifBlank { sw.siteNotes.ifBlank { sw.country.ifBlank { "Shearwater" } } }
-        val found = sites.firstOrNull {
-            it.name.equals(name, ignoreCase = true) &&
-                (it.country.isBlank() || sw.country.isBlank() || it.country.equals(sw.country, ignoreCase = true))
+    private fun siteName(sw: ShearwaterDive) = sw.siteName.ifBlank { sw.siteNotes.ifBlank { sw.country.ifBlank { "Shearwater" } } }
+
+    private fun exactSite(name: String, country: String): DiveSite? = sites.firstOrNull {
+        it.name.equals(name, ignoreCase = true) && (it.country.isBlank() || country.isBlank() || it.country.equals(country, ignoreCase = true))
+    }
+
+    /**
+     * Le site existant dont le nom ressemble à [name] (à l'orthographe près) sans être identique, dans le même pays et
+     * pas manifestement ailleurs. `null` s'il n'y en a pas. Préfère le site le plus ressemblant, puis le site localisé.
+     */
+    internal fun similarSiteFor(name: String, country: String, lat: Double?, lon: Double?): DiveSite? = sites
+        .filter {
+            countriesCompatible(it.country, country) && !farApart(it.latitude, it.longitude, lat, lon) &&
+                siteNameSimilarity(it.name, name) >= SITE_NAME_THRESHOLD
         }
-        if (found != null) return found
+        .maxWithOrNull(compareBy<DiveSite> { siteNameSimilarity(it.name, name) }.thenBy { it.latitude != null })
+
+    /** Les sites de l'export qui seront rattachés à un site existant au nom proche : (nom dans l'export, site du carnet). */
+    internal fun similarSiteMatches(plan: List<ShearwaterPlanItem>): List<Pair<String, DiveSite>> = plan
+        .filter { it.mergeInto == null && !it.alreadyDone }
+        .map { it.dive }
+        .distinctBy { siteName(it).lowercase() }
+        .mapNotNull { sw ->
+            val name = siteName(sw)
+            if (exactSite(name, sw.country) != null) null
+            else similarSiteFor(name, sw.country, sw.latitude, sw.longitude)?.let { name to it }
+        }
+
+    private fun siteFor(sw: ShearwaterDive, attachSimilar: Boolean): DiveSite {
+        val name = siteName(sw)
+        val found = exactSite(name, sw.country) ?: if (attachSimilar) similarSiteFor(name, sw.country, sw.latitude, sw.longitude) else null
+        if (found != null) {
+            // Site connu mais sans position, que l'export localise : on le complète.
+            val la = sw.latitude
+            val lo = sw.longitude
+            if (found.latitude == null && found.longitude == null && la != null && lo != null) {
+                return found.copy(latitude = la, longitude = lo).also { saveSite(it, persist = false) }
+            }
+            return found
+        }
         return DiveSite(
             id = newId(), name = name, country = sw.country, latitude = sw.latitude, longitude = sw.longitude,
             notes = if (sw.siteName.isNotBlank()) sw.siteNotes else "",
         ).also { saveSite(it, persist = false) }
     }
 
-    private fun newDiveFrom(sw: ShearwaterDive): Dive = Dive(
+    private fun newDiveFrom(sw: ShearwaterDive, attachSimilar: Boolean): Dive = Dive(
         id = newId(),
-        siteId = siteFor(sw).id,
+        siteId = siteFor(sw, attachSimilar).id,
         date = sw.date,
         startTime = sw.startTime,
         endTime = sw.endTime,

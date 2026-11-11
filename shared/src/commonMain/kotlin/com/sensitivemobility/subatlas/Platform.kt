@@ -67,6 +67,12 @@ interface PlatformActions {
     /** Fait choisir un fichier texte à l'utilisateur et renvoie son contenu ; `null` s'il annule. */
     suspend fun openTextFile(): String?
 
+    /**
+     * Requête HTTP GET : renvoie le corps de la réponse (texte UTF-8), ou `null` si la requête échoue (pas de réseau,
+     * code d'erreur, délai dépassé) ou si la plateforme ne sait pas le faire.
+     */
+    suspend fun httpGet(url: String, userAgent: String): String? = null
+
     /** Fait choisir un fichier quelconque à l'utilisateur et renvoie ses octets ; `null` s'il annule. */
     suspend fun openFileBytes(): ByteArray?
 }

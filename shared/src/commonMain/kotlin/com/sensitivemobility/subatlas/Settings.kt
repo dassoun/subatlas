@@ -31,6 +31,8 @@ data class Settings(
     val ascent: AscentScale = AscentScale(),
     /** Courbes affichées en plus de la profondeur sur le graphique d'une plongée. */
     val chartSeries: Set<ChartSeries> = setOf(ChartSeries.PRESSURE),
+    /** Couples de sites que l'utilisateur a déclarés distincts (« id:id »), à ne plus proposer comme doublons. */
+    val distinctSites: Set<String> = emptySet(),
 )
 
 /** Courbes que le graphique d'une plongée peut superposer à la profondeur (quand l'ordinateur les a enregistrées). */

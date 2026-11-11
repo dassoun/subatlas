@@ -25,7 +25,10 @@ import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.CoreLocation.kCLAuthorizationStatusNotDetermined
 import platform.Foundation.NSError
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSHTTPURLResponse
 import platform.Foundation.NSLocale
+import platform.Foundation.NSMutableURLRequest
+import platform.Foundation.NSURLSession
 import platform.Foundation.NSString
 import platform.Foundation.NSURL
 import platform.Foundation.NSUTF8StringEncoding
@@ -80,6 +83,28 @@ class IosPlatformActions : PlatformActions {
     override fun shareText(text: String) {
         val sheet = UIActivityViewController(activityItems = listOf(text), applicationActivities = null)
         UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(sheet, animated = true, completion = null)
+    }
+
+    override suspend fun httpGet(url: String, userAgent: String): String? = suspendCancellableCoroutine { cont ->
+        val nsUrl = NSURL.URLWithString(url)
+        if (nsUrl == null) {
+            cont.resume(null)
+            return@suspendCancellableCoroutine
+        }
+        val request = NSMutableURLRequest.requestWithURL(nsUrl)
+        request.setValue(userAgent, forHTTPHeaderField = "User-Agent")
+        request.timeoutInterval = 15.0
+        val task = NSURLSession.sharedSession.dataTaskWithRequest(request) { data, response, error ->
+            val status = (response as? NSHTTPURLResponse)?.statusCode
+            val text = if (error == null && data != null && status == 200L) {
+                NSString.create(data = data, encoding = NSUTF8StringEncoding)?.toString()
+            } else {
+                null
+            }
+            cont.resume(text)
+        }
+        cont.invokeOnCancellation { task.cancel() }
+        task.resume()
     }
 
     override suspend fun openFileBytes(): ByteArray? =
