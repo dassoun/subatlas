@@ -33,6 +33,8 @@ interface Strings {
     val newSite: String
     val editSite: String
     val noSites: String
+    val searchSites: String
+    val noSiteFound: String
     val addSite: String
     fun maxDepthShort(meters: Int): String
     fun access(access: SiteAccess): String
@@ -139,6 +141,13 @@ interface Strings {
     fun shearwaterMore(count: Int): String
     fun shearwaterPresent(count: Int): String
     val advancedSection: String
+    val devSection: String
+    val deleteNoGps: String
+    val deleteNoGpsHint: String
+    val deleteNoGpsTitle: String
+    fun deleteNoGpsMessage(sites: Int, dives: Int): String
+    val deleteNoGpsDoneTitle: String
+    fun deleteNoGpsDone(count: Int): String
     val deleteAllDives: String
     val deleteAllDivesHint: String
     val deleteAllTitle: String
@@ -328,6 +337,8 @@ object FrStrings : Strings {
 
     override val newSite = "Nouveau site"
     override val editSite = "Modifier le site"
+    override val searchSites = "Rechercher un site"
+    override val noSiteFound = "Aucun site ne correspond."
     override val noSites = "Aucun site pour l'instant.\nAppuyez sur « Ajouter un site » pour enregistrer votre position GPS."
     override val addSite = "Ajouter un site"
     override fun maxDepthShort(meters: Int) = "max $meters m"
@@ -475,6 +486,14 @@ object FrStrings : Strings {
         "Une plongée du carnet à la même date et à moins d'une heure est complétée avec les données de l'ordinateur et reçoit la courbe ; rien de ce que vous avez saisi n'est écrasé."
     override fun shearwaterMore(count: Int) = "… et $count autres plongées"
     override val advancedSection = "Avancé"
+    override val devSection = "Développeur"
+    override val deleteNoGps = "Effacer les sites sans GPS"
+    override val deleteNoGpsHint = "Supprime tous les sites sans coordonnées GPS. Les plongées sont conservées."
+    override val deleteNoGpsTitle = "Effacer les sites sans GPS ?"
+    override fun deleteNoGpsMessage(sites: Int, dives: Int) =
+        "$sites site${if (sites > 1) "s" else ""} sans coordonnées GPS ${if (sites > 1) "seront supprimés" else "sera supprimé"}. Les $dives plongée${if (dives > 1) "s" else ""} rattachée${if (dives > 1) "s" else ""} ${if (dives > 1) "sont conservées" else "est conservée"} mais n'${if (dives > 1) "auront" else "aura"} plus de site. Cette opération est IRRÉVERSIBLE."
+    override val deleteNoGpsDoneTitle = "Sites effacés"
+    override fun deleteNoGpsDone(count: Int) = "$count site${if (count > 1) "s" else ""} supprimé${if (count > 1) "s" else ""}."
     override val deleteAllDives = "Effacer les plongées"
     override val deleteAllDivesHint = "Supprime définitivement toutes les plongées du carnet. Les sites, centres et listes de contrôle sont conservés."
     override val deleteAllTitle = "Effacer toutes les plongées ?"
@@ -603,7 +622,7 @@ object FrStrings : Strings {
     override val siteDivesTitle = "Plongées sur ce site"
     override val addDiveHere = "Ajouter une plongée ici"
     override fun confirmDeleteSiteWithDives(name: String, diveCount: Int) =
-        "Supprimer « $name » et ses $diveCount plongée${if (diveCount > 1) "s" else ""} ?"
+        "Supprimer « $name » ? Ses $diveCount plongée${if (diveCount > 1) "s" else ""} ${if (diveCount > 1) "seront conservées" else "sera conservée"} sans site."
     override fun confirmDeleteDive(site: String, date: String) = "Supprimer la plongée du $date sur « $site » ?"
 
     override val themeSection = "Thème"
@@ -753,6 +772,8 @@ object EnStrings : Strings {
 
     override val newSite = "New site"
     override val editSite = "Edit site"
+    override val searchSites = "Search a site"
+    override val noSiteFound = "No matching site."
     override val noSites = "No sites yet.\nTap “Add a site” to save your GPS position."
     override val addSite = "Add a site"
     override fun maxDepthShort(meters: Int) = "max $meters m"
@@ -899,6 +920,14 @@ object EnStrings : Strings {
         "A logbook dive on the same date and within one hour is completed with the computer's data and gets the profile; nothing you typed is overwritten."
     override fun shearwaterMore(count: Int) = "… and $count more dives"
     override val advancedSection = "Advanced"
+    override val devSection = "Developer"
+    override val deleteNoGps = "Delete sites without GPS"
+    override val deleteNoGpsHint = "Deletes every site without GPS coordinates. Dives are kept."
+    override val deleteNoGpsTitle = "Delete sites without GPS?"
+    override fun deleteNoGpsMessage(sites: Int, dives: Int) =
+        "$sites site${if (sites != 1) "s" else ""} without GPS coordinates will be deleted. The $dives attached dive${if (dives != 1) "s" else ""} will be kept but left without a site. This CANNOT be undone."
+    override val deleteNoGpsDoneTitle = "Sites deleted"
+    override fun deleteNoGpsDone(count: Int) = "$count site${if (count != 1) "s" else ""} deleted."
     override val deleteAllDives = "Delete all dives"
     override val deleteAllDivesHint = "Permanently deletes every dive in the logbook. Sites, centers and checklists are kept."
     override val deleteAllTitle = "Delete all dives?"
@@ -1027,7 +1056,7 @@ object EnStrings : Strings {
     override val siteDivesTitle = "Dives at this site"
     override val addDiveHere = "Add a dive here"
     override fun confirmDeleteSiteWithDives(name: String, diveCount: Int) =
-        "Delete “$name” and its $diveCount dive${if (diveCount != 1) "s" else ""}?"
+        "Delete “$name”? Its $diveCount dive${if (diveCount != 1) "s" else ""} will be kept without a site."
     override fun confirmDeleteDive(site: String, date: String) = "Delete the dive of $date at “$site”?"
 
     override val themeSection = "Theme"

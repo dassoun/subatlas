@@ -132,11 +132,19 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         if (persist) saveSites()
     }
 
-    /** Supprime aussi les plongées faites sur ce site. */
+    /** Les plongées faites sur ce site sont conservées, sans site. */
     fun deleteSite(id: Long) {
         sites.removeAll { it.id == id }
         saveSites()
-        if (dives.removeAll { it.siteId == id }) saveDives()
+    }
+
+    /** Outil développeur : supprime les sites sans coordonnées GPS ; les plongées sont conservées. Renvoie le nombre de sites supprimés. */
+    fun deleteSitesWithoutGps(): Int {
+        val ids = sites.filter { it.latitude == null || it.longitude == null }.map { it.id }.toSet()
+        if (ids.isEmpty()) return 0
+        sites.removeAll { it.id in ids }
+        saveSites()
+        return ids.size
     }
 
     // --- Doublons de sites ---

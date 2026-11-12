@@ -1,10 +1,14 @@
 package com.sensitivemobility.subatlas
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,16 +125,48 @@ class MainActivity : ComponentActivity() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                 }
-                if (uri != null) readIncomingFile(uri)
+                if (uri != null) readIncomingFile(uri, keepCopy = true)
             }
         }
     }
 
-    /** Lit le fichier reçu hors du fil principal, puis le transmet à l'écran principal (qui le reconnaît ou le refuse). */
-    private fun readIncomingFile(uri: Uri) {
+    /**
+     * Lit le fichier reçu hors du fil principal, puis le transmet à l'écran principal (qui le reconnaît ou le refuse).
+     * Avec [keepCopy], une base SQLite reçue (export Shearwater) est aussi sauvegardée dans Téléchargements.
+     */
+    private fun readIncomingFile(uri: Uri, keepCopy: Boolean = false) {
         Thread {
             val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes != null) runOnUiThread { IncomingFile.pending = bytes }
+            if (bytes != null) {
+                if (keepCopy && isSqlite(bytes)) {
+                    val saved = runCatching { saveToDownloads(uri, bytes) }.getOrDefault(false)
+                    if (saved) runOnUiThread { Toast.makeText(this, "Export enregistré dans Téléchargements", Toast.LENGTH_SHORT).show() }
+                }
+                runOnUiThread { IncomingFile.pending = bytes }
+            }
         }.start()
+    }
+
+    private fun isSqlite(bytes: ByteArray): Boolean {
+        val magic = "SQLite format 3".encodeToByteArray()
+        return bytes.size > magic.size && magic.indices.all { bytes[it] == magic[it] }
+    }
+
+    /** Enregistre [bytes] dans le dossier Téléchargements (Android 10+ ; avant, l'accès demanderait une permission de stockage). */
+    private fun saveToDownloads(source: Uri, bytes: ByteArray): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
+        val original = contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { if (it.moveToFirst()) it.getString(0) else null }
+        val base = original?.takeIf { it.isNotBlank() } ?: ("shearwater-" + System.currentTimeMillis() + ".db")
+        val name = if (base.contains('.')) base else "$base.db"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val target = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        contentResolver.openOutputStream(target)?.use { it.write(bytes) } ?: return false
+        contentResolver.update(target, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+        return true
     }
 }

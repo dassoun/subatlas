@@ -141,6 +141,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     // Position de défilement de chaque liste, conservée quand on ouvre une fiche puis qu'on revient.
     val divesListState = rememberLazyListState()
     val sitesListState = rememberLazyListState()
+    // Recherche de la liste des sites, conservée en ouvrant une fiche puis en revenant.
+    var sitesQuery by remember { mutableStateOf("") }
     val centersListState = rememberLazyListState()
     val checklistsListState = rememberLazyListState()
     val current = stack.last()
@@ -314,7 +316,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             listState = divesListState,
                         )
                     Screen.Sites ->
-                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, onDuplicates = { push(Screen.SiteDuplicates) }, listState = sitesListState)
+                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, onDuplicates = { push(Screen.SiteDuplicates) }, listState = sitesListState, query = sitesQuery, onQuery = { sitesQuery = it })
                     Screen.Centers ->
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
@@ -568,6 +570,19 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
     val s = LocalStrings.current
     val scroll = rememberScrollState()
     var advanced by remember { mutableStateOf(false) }
+    var devMode by remember { mutableStateOf(false) }
+    var taps by remember { mutableStateOf(0) }
+    var lastTap by remember { mutableStateOf(0L) }
+    // Au déverrouillage, la page suit l'ouverture animée de la zone développeur jusqu'en bas.
+    LaunchedEffect(devMode) {
+        if (devMode) {
+            val start = withFrameNanos { it }
+            do {
+                val t = withFrameNanos { it }
+                scroll.scrollTo(scroll.maxValue)
+            } while (t - start < 600_000_000L)
+        }
+    }
     // En dépliant « Avancé », la page défile en douceur jusqu'au nouveau contenu.
     LaunchedEffect(advanced) {
         if (advanced) {
@@ -640,6 +655,8 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
         var confirmDelete by remember { mutableStateOf(false) }
         // Nombre de plongées effacées, affiché une fois l'opération terminée.
         var deletedCount by remember { mutableStateOf<Int?>(null) }
+        var confirmNoGps by remember { mutableStateOf(false) }
+        var deletedSites by remember { mutableStateOf<Int?>(null) }
         Row(
             Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -648,7 +665,20 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
             Text(if (advanced) "▴" else "▾", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         }
         if (advanced) {
-            Text(s.deleteAllDivesHint, style = MaterialTheme.typography.bodyMedium)
+            // 7 appuis rapprochés sur ce libellé : déverrouille les fonctions réservées au développement.
+            Text(
+                s.deleteAllDivesHint,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    val now = Clock.System.now().toEpochMilliseconds()
+                    taps = if (now - lastTap < 600) taps + 1 else 1
+                    lastTap = now
+                    if (taps >= 7 && !devMode) devMode = true
+                },
+            )
             Button(
                 onClick = { confirmDelete = true },
                 enabled = state.dives.isNotEmpty(),
@@ -658,6 +688,53 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
                     contentColor = MaterialTheme.colorScheme.onError,
                 ),
             ) { Text("⚠️ " + s.deleteAllDives) }
+            AnimatedVisibility(
+                visible = devMode,
+                enter = androidx.compose.animation.expandVertically(tween(450)) + androidx.compose.animation.fadeIn(tween(450)),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionTitle(s.devSection)
+                    Text(s.deleteNoGpsHint, style = MaterialTheme.typography.bodyMedium)
+                    Button(
+                        onClick = { confirmNoGps = true },
+                        enabled = state.sites.any { it.latitude == null || it.longitude == null },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) { Text("⚠️ " + s.deleteNoGps) }
+                }
+            }
+        }
+        if (confirmNoGps) {
+            val doomed = state.sites.filter { it.latitude == null || it.longitude == null }.map { it.id }.toSet()
+            val diveCount = state.dives.count { it.siteId in doomed }
+            AlertDialog(
+                onDismissRequest = { confirmNoGps = false },
+                icon = { Text("⚠️", fontSize = 32.sp) },
+                title = { Text(s.deleteNoGpsTitle, color = MaterialTheme.colorScheme.error) },
+                text = { Text(s.deleteNoGpsMessage(doomed.size, diveCount)) },
+                confirmButton = {
+                    Button(
+                        onClick = { deletedSites = state.deleteSitesWithoutGps(); confirmNoGps = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) { Text(s.deleteAllConfirm) }
+                },
+                dismissButton = { TextButton(onClick = { confirmNoGps = false }) { Text(s.cancel) } },
+            )
+        }
+        deletedSites?.let { n ->
+            AlertDialog(
+                onDismissRequest = { deletedSites = null },
+                icon = { Text("✅", fontSize = 32.sp) },
+                title = { Text(s.deleteNoGpsDoneTitle) },
+                text = { Text(s.deleteNoGpsDone(n)) },
+                confirmButton = { TextButton(onClick = { deletedSites = null }) { Text(s.ok) } },
+            )
         }
         if (confirmDelete) {
             AlertDialog(
@@ -767,15 +844,29 @@ private fun BackArrow(onClick: () -> Unit) {
 // ---------------------------------------------------------------- Sites
 
 @Composable
-private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, onDuplicates: () -> Unit, listState: LazyListState) {
+private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, onDuplicates: () -> Unit, listState: LazyListState, query: String, onQuery: (String) -> Unit) {
     val s = LocalStrings.current
     val duplicateCount = remember(state.sites.toList(), state.settings.distinctSites) { state.siteDuplicateGroups().size }
+    // Recherche sur le nom et le pays, sans tenir compte des accents ni de la casse.
+    val needle = normalizeSiteName(query)
+    val shown = if (needle.isEmpty()) state.sites.toList() else state.sites.filter {
+        normalizeSiteName(it.name + " " + it.countryText()).contains(needle)
+    }
     Column(Modifier.fillMaxSize().padding(pad)) {
         if (state.sites.isEmpty()) {
             Text(
                 s.noSites,
                 modifier = Modifier.padding(16.dp),
             )
+        } else {
+            OutlinedTextField(
+                query, onQuery,
+                placeholder = { Text(s.searchSites) },
+                singleLine = true,
+                trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { onQuery("") }) { Text("✕") } },
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            )
+            if (shown.isEmpty()) Text(s.noSiteFound, modifier = Modifier.padding(16.dp))
         }
         LazyColumn(
             Modifier.weight(1f),
@@ -783,7 +874,7 @@ private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.sites, key = { it.id }) { site ->
+            items(shown, key = { it.id }) { site ->
                 Card(
                     onClick = { onOpen(site.id) },
                     modifier = Modifier.fillMaxWidth(),
