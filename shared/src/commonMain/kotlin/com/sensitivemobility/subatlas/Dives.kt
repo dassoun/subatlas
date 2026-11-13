@@ -159,7 +159,7 @@ internal fun DiveList(
     var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
     var planSkipped by remember { mutableStateOf(0) }
     var siteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
-    var attachSimilar by remember { mutableStateOf(true) }
+    var declined by remember { mutableStateOf<Set<String>>(emptySet()) }
     var reading by remember { mutableStateOf(false) }
     var mergeAsk by remember { mutableStateOf<Pair<Dive, Dive>?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -182,7 +182,7 @@ internal fun DiveList(
                     planSkipped = file.skipped
                     val newPlan = state.planShearwaterImport(file.dives)
                     siteMatches = state.similarSiteMatches(newPlan)
-                    attachSimilar = true
+                    declined = emptySet()
                     plan = newPlan
                 }
             } catch (e: ShearwaterImport.NotShearwaterException) {
@@ -277,10 +277,10 @@ internal fun DiveList(
             items,
             planSkipped,
             siteMatches = siteMatches,
-            attachSimilar = attachSimilar,
-            onAttachChange = { attachSimilar = it },
+            declined = declined,
+            onToggle = { declined = if (it in declined) declined - it else declined + it },
             onConfirm = {
-                val (created, merged) = state.applyShearwaterImport(items, attachSimilar)
+                val (created, merged) = state.applyShearwaterImport(items, declined)
                 plan = null
                 message = s.shearwaterDone(created, merged)
             },
@@ -335,8 +335,8 @@ internal fun ShearwaterPlanDialog(
     items: List<ShearwaterPlanItem>,
     skipped: Int,
     siteMatches: List<Pair<String, DiveSite>>,
-    attachSimilar: Boolean,
-    onAttachChange: (Boolean) -> Unit,
+    declined: Set<String>,
+    onToggle: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -371,15 +371,17 @@ internal fun ShearwaterPlanDialog(
                 if (todo.isNotEmpty()) Text(s.shearwaterFound(todo.size, todo.size - merged, merged))
                 // Sites de l'export au nom proche d'un site du carnet : rattachés à celui-ci si l'utilisateur le confirme.
                 if (siteMatches.isNotEmpty()) {
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onAttachChange(!attachSimilar) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(attachSimilar, { onAttachChange(it) })
-                        Text(s.importAttachSimilar(siteMatches.size), style = MaterialTheme.typography.bodyMedium)
-                    }
+                    Text(s.importAttachSimilar(siteMatches.size), style = MaterialTheme.typography.bodyMedium)
+                    // Une case par site : chaque rattachement s'accepte ou se refuse s\u00e9par\u00e9ment.
                     siteMatches.forEach { (from, site) ->
-                        Text("\u00ab $from \u00bb \u2192 \u00ab ${site.name} \u00bb", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val key = from.lowercase()
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onToggle(key) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(key !in declined, { onToggle(key) })
+                            Text("\u00ab $from \u00bb \u2192 \u00ab ${site.name} \u00bb", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
                 // Toutes les plongées à traiter sont listées.
@@ -933,9 +935,10 @@ internal fun DiveForm(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text(site.fullName())
                                 val la = site.latitude
                                 val lo = site.longitude
+                                // Globe quand le site a une position GPS.
+                                Text(site.fullName() + if (la != null && lo != null) " 🌐" else "")
                                 val sub = if (here != null && la != null && lo != null) {
                                     s.distanceAway(formatDistance(distanceMeters(here.latitude, here.longitude, la, lo)))
                                 } else if (la == null || lo == null) {

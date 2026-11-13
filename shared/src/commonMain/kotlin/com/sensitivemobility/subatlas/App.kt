@@ -163,7 +163,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var incomingDiveFile by remember { mutableStateOf<DiveFile?>(null) }
     var incomingSkipped by remember { mutableStateOf(0) }
     var incomingSiteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
-    var incomingAttach by remember { mutableStateOf(true) }
+    var incomingDeclined by remember { mutableStateOf<Set<String>>(emptySet()) }
     var incomingReading by remember { mutableStateOf(false) }
 
     // Lien de plongée ouvert depuis un message (ou collé) : on propose de l'ajouter au carnet.
@@ -203,7 +203,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         incomingSkipped = file.skipped
                         val newPlan = state.planShearwaterImport(file.dives)
                         incomingSiteMatches = state.similarSiteMatches(newPlan)
-                        incomingAttach = true
+                        incomingDeclined = emptySet()
                         incomingPlan = newPlan
                     }
                 } catch (e: CancellationException) {
@@ -467,10 +467,10 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 items,
                 incomingSkipped,
                 siteMatches = incomingSiteMatches,
-                attachSimilar = incomingAttach,
-                onAttachChange = { incomingAttach = it },
+                declined = incomingDeclined,
+                onToggle = { incomingDeclined = if (it in incomingDeclined) incomingDeclined - it else incomingDeclined + it },
                 onConfirm = {
-                    val (created, merged) = state.applyShearwaterImport(items, incomingAttach)
+                    val (created, merged) = state.applyShearwaterImport(items, incomingDeclined)
                     incomingPlan = null
                     goTab(Screen.Dives)
                     notice = strings.shearwaterDone(created, merged)

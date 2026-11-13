@@ -254,7 +254,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /** Applique l'import : renvoie (plongées créées, plongées fusionnées). */
-    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>, attachSimilar: Boolean = true): Pair<Int, Int> {
+    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>, declined: Set<String> = emptySet()): Pair<Int, Int> {
         var created = 0
         var merged = 0
         for (item in plan) {
@@ -265,7 +265,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
                 saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
                 merged++
             } else {
-                saveDive(newDiveFrom(item.dive, attachSimilar), persist = false)
+                saveDive(newDiveFrom(item.dive, declined), persist = false)
                 created++
             }
         }
@@ -303,9 +303,10 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
             else similarSiteFor(name, sw.country, sw.latitude, sw.longitude)?.let { name to it }
         }
 
-    private fun siteFor(sw: ShearwaterDive, attachSimilar: Boolean): DiveSite {
+    /** [declined] : noms (en minuscules) des sites de l'export dont l'utilisateur refuse le rattachement à un site proche. */
+    private fun siteFor(sw: ShearwaterDive, declined: Set<String>): DiveSite {
         val name = siteName(sw)
-        val found = exactSite(name, sw.country) ?: if (attachSimilar) similarSiteFor(name, sw.country, sw.latitude, sw.longitude) else null
+        val found = exactSite(name, sw.country) ?: if (name.lowercase() !in declined) similarSiteFor(name, sw.country, sw.latitude, sw.longitude) else null
         if (found != null) {
             // Site connu mais sans position, que l'export localise : on le complète.
             val la = sw.latitude
@@ -321,9 +322,9 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         ).also { saveSite(it, persist = false) }
     }
 
-    private fun newDiveFrom(sw: ShearwaterDive, attachSimilar: Boolean): Dive = Dive(
+    private fun newDiveFrom(sw: ShearwaterDive, declined: Set<String>): Dive = Dive(
         id = newId(),
-        siteId = siteFor(sw, attachSimilar).id,
+        siteId = siteFor(sw, declined).id,
         date = sw.date,
         startTime = sw.startTime,
         endTime = sw.endTime,
