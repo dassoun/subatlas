@@ -38,6 +38,8 @@ internal class ShearwaterDive(
     val visibilityMeters: Int?,
     val computer: String,
     val profile: DiveProfile?,
+    /** Plongée lue dans un export Dive Logs Data (divelogs.de) : même aperçu et même fusion, avec ses propres règles (voir `mergeDivelogs`). */
+    val fromDivelogs: Boolean = false,
 )
 
 /**

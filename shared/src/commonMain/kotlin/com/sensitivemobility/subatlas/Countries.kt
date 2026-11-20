@@ -283,6 +283,21 @@ private fun flagOf(code: String): String =
 /** Drapeau du pays saisi (nom français ou anglais, ou code ISO) ; `null` s'il n'est pas reconnu. */
 internal fun countryFlag(country: String): String? = byName[normalizeCountry(country)]?.let(::flagOf)
 
+/**
+ * Clé de regroupement d'un pays saisi : son code ISO s'il est reconnu (« France », « france » et « FR » vont ensemble),
+ * sinon la saisie sans accents ni casse. Vide si aucun pays n'est renseigné.
+ */
+internal fun countryKey(country: String): String = normalizeCountry(country).let { byName[it] ?: it }
+
+/**
+ * Pays à afficher pour une clé de [countryKey] : « 🇫🇷 France » dans la langue demandée quand le pays est reconnu,
+ * sinon le texte tel que [fallback] (la saisie d'origine) l'a écrit.
+ */
+internal fun countryLabel(key: String, french: Boolean, fallback: String): String {
+    val entry = countries.firstOrNull { it.code == key } ?: return fallback.trim()
+    return flagOf(entry.code) + " " + (if (french) entry.fr else entry.en)
+}
+
 /** Pays de la table dont le nom contient la saisie : (nom dans la langue demandée, drapeau). */
 internal fun countrySuggestions(query: String, french: Boolean, limit: Int): List<Pair<String, String>> {
     val q = normalizeCountry(query)

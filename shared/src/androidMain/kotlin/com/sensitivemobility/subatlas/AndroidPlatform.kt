@@ -2,17 +2,22 @@ package com.sensitivemobility.subatlas
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Looper
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import androidx.activity.compose.BackHandler as ActivityBackHandler
 import androidx.compose.runtime.Composable
 import androidx.core.content.ContextCompat
@@ -29,23 +34,81 @@ class AndroidStorage(context: Context) : Storage {
     private val dir = context.filesDir
     override fun read(name: String): String? = File(dir, name).takeIf { it.exists() }?.readText()
     override fun write(name: String, text: String) = File(dir, name).writeText(text)
+
+    // Photos : « photos/123.jpg » est rangé dans un sous-dossier des fichiers privés de l'appli (invisible des autres applis).
+    override fun readBytes(name: String): ByteArray? = runCatching { File(dir, name).takeIf { it.isFile }?.readBytes() }.getOrNull()
+    override fun writeBytes(name: String, bytes: ByteArray): Boolean = runCatching {
+        File(dir, name).also { it.parentFile?.mkdirs() }.writeBytes(bytes)
+        true
+    }.getOrDefault(false)
+    override fun delete(name: String) {
+        runCatching { File(dir, name).delete() }
+    }
 }
 
 /**
  * @param pickSaveUri ouvre le sélecteur « Enregistrer sous » du système (fourni par l'Activity) ; `null` si annulé.
  * @param pickOpenUri ouvre le sélecteur de fichier du système (fourni par l'Activity) ; `null` si annulé.
+ * @param pickPhotoUris ouvre la galerie du système en sélection multiple (fournie par l'Activity) ; liste vide si annulé.
+ * @param requestDelete lance la demande de suppression du système (confirmation de l'utilisateur) ; `true` s'il accepte.
  */
 class AndroidPlatformActions(
     private val context: Context,
     private val pickSaveUri: suspend (suggestedName: String) -> Uri?,
     private val pickOpenUri: suspend () -> Uri?,
+    private val pickPhotoUris: suspend () -> List<Uri>,
+    private val requestDelete: suspend (IntentSender) -> Boolean,
 ) : PlatformActions {
+    override val canPickPhotos: Boolean get() = true
+
+    override suspend fun pickPhotos(): List<PreparedPhoto> {
+        val uris = pickPhotoUris()
+        // Une photo à la fois : l'image d'origine, lourde, n'est jamais gardée en mémoire en plusieurs exemplaires.
+        return withContext(Dispatchers.IO) {
+            uris.mapNotNull { uri ->
+                // L'accès à la photo d'origine est gardé au-delà de cette séance : il servira à la supprimer de la galerie plus tard.
+                runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                preparePhoto(context, uri)?.let { PreparedPhoto(it.full, it.thumb, it.width, it.height, uri.toString()) }
+            }
+        }
+    }
+
+    override suspend fun deletePhotoOriginal(source: String): Boolean {
+        // La suppression avec confirmation du système existe depuis Android 11 ; avant, il faudrait l'accès à tous les fichiers.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || source.isBlank()) return false
+        val uri = mediaStoreUri(Uri.parse(source)) ?: return false
+        return runCatching {
+            requestDelete(MediaStore.createDeleteRequest(context.contentResolver, listOf(uri)).intentSender)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * L'adresse, dans la médiathèque d'Android (MediaStore), de la photo choisie dans la galerie : le sélecteur de photos et le
+     * sélecteur de documents donnent chacun une adresse à eux, dont le dernier élément est l'identifiant de la photo.
+     */
+    private fun mediaStoreUri(picked: Uri): Uri? {
+        val id = when (picked.authority) {
+            "media" -> picked.lastPathSegment?.toLongOrNull()
+            "com.android.providers.media.documents" -> picked.lastPathSegment?.substringAfter(':')?.toLongOrNull()
+            else -> null
+        } ?: return null
+        return ContentUris.withAppendedId(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), id)
+    }
+
     override fun openLink(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
     }
 
     override fun systemLanguage(): String = java.util.Locale.getDefault().language
+
+    override fun isOnline(): Boolean = runCatching {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return@runCatching false
+        // « validé » : Android a vérifié que ce réseau atteint vraiment internet (pas un portail captif, par exemple).
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(false)
 
     override fun shareFile(name: String, mimeType: String, bytes: ByteArray): Boolean = runCatching {
         // Fichier temporaire du cache, exposé au temps du partage par le FileProvider de l'appli.
@@ -94,6 +157,22 @@ class AndroidPlatformActions(
                 connection.setRequestProperty("User-Agent", userAgent)
                 connection.setRequestProperty("Accept", "application/json")
                 if (connection.responseCode == 200) connection.inputStream.use { it.readBytes().decodeToString() } else null
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    override suspend fun httpGetBytes(url: String, userAgent: String): ByteArray? = withContext(Dispatchers.IO) {
+        // Cache HTTP du système (respecte les durées de validité du serveur) : les tuiles déjà vues ne sont pas retéléchargées.
+        runCatching { android.net.http.HttpResponseCache.install(File(context.cacheDir, "http"), 30L * 1024 * 1024) }
+        runCatching {
+            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 15_000
+                connection.setRequestProperty("User-Agent", userAgent)
+                if (connection.responseCode == 200) connection.inputStream.use { it.readBytes() } else null
             } finally {
                 connection.disconnect()
             }

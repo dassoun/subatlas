@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Recherche des coordonnées d'un site par son nom (OpenStreetMap). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Savoir si le réseau fonctionne : la carte s'ouvre en vue satellite avec du réseau, en plan sans. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:allowBackup="true"
@@ -14,6 +16,11 @@
         android:label="Sub Atlas"
         android:supportsRtl="true"
         android:theme="@style/Theme.SubAtlas">
+        <!-- Clé de l'API Google Maps (SDK Maps pour Android), lue dans local.properties : voir androidApp/build.gradle.kts. -->
+        <meta-data android:name="com.google.android.geo.API_KEY" android:value="${MAPS_API_KEY}" />
+        <!-- Le module Maps de Google Play services utilise l'ancienne bibliothèque HTTP Apache, absente par défaut
+             depuis Android 9 : sans cette déclaration, la carte plante (NoClassDefFoundError org.apache.http.ProtocolVersion). -->
+        <uses-library android:name="org.apache.http.legacy" android:required="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

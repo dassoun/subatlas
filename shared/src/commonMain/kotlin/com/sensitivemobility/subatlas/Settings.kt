@@ -39,19 +39,86 @@ data class Settings(
 @Serializable
 enum class ChartSeries { PRESSURE, NDL, DECO, CNS, PPO2 }
 
+/** Un seuil de vitesse de remontée : au-delà de [above] m/min, le tronçon de courbe prend la couleur [color] (index de [ASCENT_PALETTE]). */
+@Serializable
+data class AscentLevel(val above: Int, val color: Int)
+
+/** Seuils proposés au départ : jaune, orange, rouge. Ce sont des repères de l'appli, non ceux d'un fabricant. */
+internal val DEFAULT_ASCENT_LEVELS: List<AscentLevel> = listOf(AscentLevel(10, 0), AscentLevel(15, 1), AscentLevel(20, 2))
+
+/** Vitesse maximale réglable d'un seuil (m/min). */
+internal const val MAX_ASCENT_RATE = 99
+
+/** Nombre maximal de seuils : un par couleur de la palette, pour que chacun reste reconnaissable. */
+internal const val MAX_ASCENT_LEVELS = 8
+
 /**
- * Seuils de vitesse de remontée (m/min) au-delà desquels le tronçon de courbe change de couleur, et couleur de chacun
- * (index de [ASCENT_PALETTE]). Les valeurs par défaut sont des repères de l'appli, non ceux d'un fabricant.
+ * Seuils de vitesse de remontée au-delà desquels le tronçon de courbe change de couleur : [levels], du plus bas au plus haut
+ * (valeurs toutes différentes). Libre à l'utilisateur d'en ajouter, d'en retirer ou de n'en garder aucun.
+ *
+ * Les six champs suivants sont les anciens réglages à trois niveaux fixes : ils ne servent qu'à relire un `settings.json`
+ * enregistré avant l'arrivée de la liste (voir [migrated]) et ne sont plus jamais réécrits.
  */
 @Serializable
 data class AscentScale(
-    val yellowAbove: Int = 10,
-    val orangeAbove: Int = 15,
-    val redAbove: Int = 20,
-    val yellowColor: Int = 0,
-    val orangeColor: Int = 1,
-    val redColor: Int = 2,
-)
+    val levels: List<AscentLevel> = DEFAULT_ASCENT_LEVELS,
+    val yellowAbove: Int? = null,
+    val orangeAbove: Int? = null,
+    val redAbove: Int? = null,
+    val yellowColor: Int? = null,
+    val orangeColor: Int? = null,
+    val redColor: Int? = null,
+) {
+    /**
+     * Échelle prête à l'emploi : reprend les anciens réglages à trois niveaux s'ils sont présents, puis remet la liste en
+     * ordre (valeurs entre 1 et [MAX_ASCENT_RATE], sans doublon, couleurs dans la palette). À appeler à la lecture des réglages.
+     */
+    fun migrated(): AscentScale {
+        val legacy = listOf(yellowAbove, orangeAbove, redAbove, yellowColor, orangeColor, redColor).any { it != null }
+        val source = if (legacy) {
+            listOf(
+                AscentLevel(yellowAbove ?: 10, yellowColor ?: 0),
+                AscentLevel(orangeAbove ?: 15, orangeColor ?: 1),
+                AscentLevel(redAbove ?: 20, redColor ?: 2),
+            )
+        } else {
+            levels
+        }
+        val clean = source
+            .map { AscentLevel(it.above.coerceIn(1, MAX_ASCENT_RATE), it.color.coerceIn(0, ASCENT_PALETTE.lastIndex)) }
+            .sortedBy { it.above }
+            .distinctBy { it.above }
+            .take(MAX_ASCENT_LEVELS)
+        return AscentScale(levels = clean)
+    }
+}
+
+/** Valeur du seuil [index] changée de [delta], sans franchir ses voisins : la liste reste triée et sans doublon. */
+internal fun AscentScale.stepped(index: Int, delta: Int): AscentScale {
+    val current = levels.getOrNull(index) ?: return this
+    val low = (levels.getOrNull(index - 1)?.above ?: 0) + 1
+    val high = levels.getOrNull(index + 1)?.above?.minus(1) ?: MAX_ASCENT_RATE
+    return copy(levels = levels.toMutableList().also { it[index] = current.copy(above = (current.above + delta).coerceIn(low, high)) })
+}
+
+/** Couleur du seuil [index] changée. */
+internal fun AscentScale.recolored(index: Int, color: Int): AscentScale {
+    val current = levels.getOrNull(index) ?: return this
+    return copy(levels = levels.toMutableList().also { it[index] = current.copy(color = color) })
+}
+
+/** Seuil [index] retiré. */
+internal fun AscentScale.removed(index: Int): AscentScale = copy(levels = levels.filterIndexed { i, _ -> i != index })
+
+/** `true` s'il reste de la place pour un seuil de plus (nombre maximal pas atteint, et de la marge au-dessus du dernier). */
+internal fun AscentScale.canAdd(): Boolean = levels.size < MAX_ASCENT_LEVELS && (levels.lastOrNull()?.above ?: 0) < MAX_ASCENT_RATE
+
+/** Un seuil de plus, 5 m/min au-dessus du dernier (10 s'il n'y en a aucun), avec la première couleur de la palette encore libre. */
+internal fun AscentScale.added(): AscentScale {
+    val above = ((levels.lastOrNull()?.above ?: 5) + 5).coerceAtMost(MAX_ASCENT_RATE)
+    val color = ASCENT_PALETTE.indices.firstOrNull { c -> levels.none { it.color == c } } ?: (levels.size % ASCENT_PALETTE.size)
+    return copy(levels = levels + AscentLevel(above, color))
+}
 
 /** Couleurs proposées pour les seuils de remontée (jaune, orange, rouge d'abord : ce sont les valeurs par défaut). */
 internal val ASCENT_PALETTE: List<Long> = listOf(
@@ -65,15 +132,10 @@ internal val ASCENT_PALETTE: List<Long> = listOf(
     0xFF8A9BA3, // gris
 )
 
-/** Couleur du tronçon pour cette vitesse de remontée ; `null` tant qu'elle reste sous le premier seuil. */
+/** Couleur du tronçon pour cette vitesse de remontée : celle du plus haut seuil dépassé ; `null` sous le premier seuil. */
 internal fun AscentScale.colorFor(rate: Double): androidx.compose.ui.graphics.Color? {
-    val index = when {
-        rate > redAbove -> redColor
-        rate > orangeAbove -> orangeColor
-        rate > yellowAbove -> yellowColor
-        else -> return null
-    }
-    return ASCENT_PALETTE.getOrNull(index)?.let { androidx.compose.ui.graphics.Color(it) }
+    val level = levels.filter { rate > it.above }.maxByOrNull { it.above } ?: return null
+    return ASCENT_PALETTE.getOrNull(level.color)?.let { androidx.compose.ui.graphics.Color(it) }
 }
 
 /** Lot de couleurs proposé pour distinguer les types de plongée. */

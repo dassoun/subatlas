@@ -36,6 +36,8 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
+            // Carte Google (vue satellite) ; la clé de l'API est fournie par l'application (voir androidApp).
+            implementation(libs.maps.compose)
         }
     }
 }

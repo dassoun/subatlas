@@ -26,7 +26,10 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.unit.sp
 
 /** « 🇫🇷 France » (le drapeau est omis quand le pays n'est pas reconnu). */
 internal fun DiveSite.countryText(): String =
@@ -43,7 +46,11 @@ internal fun SiteLine(site: DiveSite, style: TextStyle, modifier: Modifier = Mod
         }
         Text(site.name, style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         // Épingle quand le site a une position GPS.
-        if (showGps && site.latitude != null && site.longitude != null) Text(" \uD83D\uDCCD", style = style, maxLines = 1)
+        if (showGps && site.latitude != null && site.longitude != null) {
+            Spacer(Modifier.width(4.dp))
+            val pinSize = with(LocalDensity.current) { (style.fontSize.takeIf { it.isSpecified } ?: 14.sp).toDp() + 2.dp }
+            Pictogram(Picto.PIN, size = pinSize, tint = MaterialTheme.colorScheme.primary)
+        }
     }
 }
 
@@ -67,9 +74,12 @@ internal fun SiteTypeChips(selected: SiteType?, onSelect: (SiteType?) -> Unit) {
 /** Pictogramme d'un type de site, dessiné en traits (pas de fichier image à embarquer). */
 @Composable
 internal fun SiteTypeIcon(type: SiteType, modifier: Modifier = Modifier, tint: Color = MaterialTheme.colorScheme.primary) {
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
+    Canvas(modifier) { drawSiteType(type, tint, size.width, size.height) }
+}
+
+/** Dessine le pictogramme d'un type de site dans un carré de [w] x [h] pixels, dont le coin est à l'origine du dessin. */
+internal fun DrawScope.drawSiteType(type: SiteType, tint: Color, w: Float, h: Float) {
+    run {
         val stroke = Stroke(width = w * 0.09f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         when (type) {
             SiteType.SEA -> {

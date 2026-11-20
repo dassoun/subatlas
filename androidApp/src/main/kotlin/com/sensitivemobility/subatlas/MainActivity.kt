@@ -11,9 +11,14 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kotlinx.coroutines.CompletableDeferred
+
+/** Nombre maximal de photos choisies d'un coup (le sélecteur d'Android plafonne la sélection multiple, à 100 au mieux). */
+private const val PHOTOS_PER_PICK = 12
 
 class MainActivity : ComponentActivity() {
     private var pendingPermission: CompletableDeferred<Boolean>? = null
@@ -46,6 +51,18 @@ class MainActivity : ComponentActivity() {
     private val openLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { pendingOpen?.complete(it) }
 
+    private var pendingPhotos: CompletableDeferred<List<Uri>>? = null
+
+    // Galerie du système en sélection multiple (le sélecteur de photos d'Android : aucune permission à demander).
+    private val photosLauncher =
+        registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(PHOTOS_PER_PICK)) { pendingPhotos?.complete(it) }
+
+    private var pendingDelete: CompletableDeferred<Boolean>? = null
+
+    // Confirmation du système pour supprimer une photo de la galerie (« Autoriser SubAtlas à supprimer cette photo ? »).
+    private val deleteLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { pendingDelete?.complete(it.resultCode == RESULT_OK) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Doit précéder super.onCreate : bascule du thème de démarrage vers le thème normal.
         installSplashScreen()
@@ -58,6 +75,18 @@ class MainActivity : ComponentActivity() {
             },
             pickOpenUri = {
                 CompletableDeferred<Uri?>().also { pendingOpen = it; openLauncher.launch(arrayOf("*/*")) }.await()
+            },
+            pickPhotoUris = {
+                CompletableDeferred<List<Uri>>().also {
+                    pendingPhotos = it
+                    photosLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }.await()
+            },
+            requestDelete = { sender ->
+                CompletableDeferred<Boolean>().also {
+                    pendingDelete = it
+                    deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }.await()
             },
         )
         val location = AndroidLocationProvider(this) {

@@ -12,9 +12,9 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 
 // Palette « océan » : bleu abyssal, turquoise lagon, écume.
-private val Abyss = Color(0xFF062A40)
-private val Ocean = Color(0xFF0B4F6C)
-private val Lagoon = Color(0xFF1B9AAA)
+internal val Abyss = Color(0xFF062A40)
+internal val Ocean = Color(0xFF0B4F6C)
+internal val Lagoon = Color(0xFF1B9AAA)
 
 // États des items / des listes.
 val StatusOk = Color(0xFF0E9F7E)      // vert lagon

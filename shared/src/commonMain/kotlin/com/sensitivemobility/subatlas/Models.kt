@@ -89,6 +89,22 @@ data class Checklist(
         }
 }
 
+/**
+ * Une photo d'une plongée. Les octets ne sont pas dans `dives.json` mais dans deux fichiers du stockage de l'appli :
+ * `photos/<id>.jpg` (l'image réduite) et `photos/<id>_t.jpg` (sa vignette). [width] et [height] sont ceux de l'image.
+ */
+@Serializable
+data class DivePhoto(
+    val id: String,
+    val width: Int = 0,
+    val height: Int = 0,
+    /** Adresse de la photo d'origine dans la galerie du téléphone : sert à la supprimer de la galerie (« supprimer du téléphone »). */
+    val source: String = "",
+) {
+    val fileName: String get() = "photos/$id.jpg"
+    val thumbName: String get() = "photos/${id}_t.jpg"
+}
+
 /** Une bouteille utilisée pendant une plongée. */
 @Serializable
 data class Tank(
@@ -236,6 +252,8 @@ data class Dive(
     val noMerge: Boolean = false,
     /** Courbe de la plongée (profondeur, température, pression), si elle a été importée. */
     val profile: DiveProfile? = null,
+    /** Photos de la plongée, la première étant la couverture. Les fichiers sont dans le stockage de l'appli (voir [DivePhoto]). */
+    val photos: List<DivePhoto> = emptyList(),
 ) {
     /** Profondeur max : celle de la plongée, sinon (anciennes données) la plus grande saisie par bouteille. */
     val maxDepth: Double? get() = maxDepthMeters ?: tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()

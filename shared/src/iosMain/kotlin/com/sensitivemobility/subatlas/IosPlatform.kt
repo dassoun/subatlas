@@ -3,6 +3,8 @@ package com.sensitivemobility.subatlas
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.window.ComposeUIViewController
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Contacts.CNAuthorizationStatusAuthorized
@@ -23,6 +25,7 @@ import platform.CoreLocation.CLLocationManagerDelegateProtocol
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedAlways
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.CoreLocation.kCLAuthorizationStatusNotDetermined
+import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHTTPURLResponse
@@ -30,6 +33,7 @@ import platform.Foundation.NSLocale
 import platform.Foundation.NSMutableURLRequest
 import platform.Foundation.NSURLSession
 import platform.Foundation.NSString
+import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.NSUserDomainMask
@@ -42,6 +46,7 @@ import platform.Foundation.writeToFile
 import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIApplication
 import platform.darwin.NSObject
+import platform.posix.memcpy
 import kotlin.coroutines.resume
 
 @Composable
@@ -65,6 +70,11 @@ class IosStorage : Storage {
     }
 }
 
+@OptIn(ExperimentalForeignApi::class)
+private fun NSData.toByteArray(): ByteArray = ByteArray(length.toInt()).apply {
+    if (isNotEmpty()) usePinned { memcpy(it.addressOf(0), bytes, length) }
+}
+
 class IosPlatformActions : PlatformActions {
     override fun openLink(url: String) {
         val nsUrl = NSURL.URLWithString(url) ?: return
@@ -85,6 +95,19 @@ class IosPlatformActions : PlatformActions {
         UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(sheet, animated = true, completion = null)
     }
 
+    /** Partage un fichier (image de plongée, fichier de plongée) : écrit dans le dossier temporaire puis feuille de partage. */
+    @OptIn(ExperimentalForeignApi::class)
+    override fun shareFile(name: String, mimeType: String, bytes: ByteArray): Boolean = runCatching {
+        val data = bytes.usePinned { pinned ->
+            NSData.create(bytes = pinned.addressOf(0), length = bytes.size.toULong())
+        }
+        val path = NSTemporaryDirectory() + name
+        if (!data.writeToFile(path, atomically = true)) return@runCatching false
+        val sheet = UIActivityViewController(activityItems = listOf(NSURL.fileURLWithPath(path)), applicationActivities = null)
+        UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(sheet, animated = true, completion = null)
+        true
+    }.getOrDefault(false)
+
     override suspend fun httpGet(url: String, userAgent: String): String? = suspendCancellableCoroutine { cont ->
         val nsUrl = NSURL.URLWithString(url)
         if (nsUrl == null) {
@@ -102,6 +125,24 @@ class IosPlatformActions : PlatformActions {
                 null
             }
             cont.resume(text)
+        }
+        cont.invokeOnCancellation { task.cancel() }
+        task.resume()
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    override suspend fun httpGetBytes(url: String, userAgent: String): ByteArray? = suspendCancellableCoroutine { cont ->
+        val nsUrl = NSURL.URLWithString(url)
+        if (nsUrl == null) {
+            cont.resume(null)
+            return@suspendCancellableCoroutine
+        }
+        val request = NSMutableURLRequest.requestWithURL(nsUrl)
+        request.setValue(userAgent, forHTTPHeaderField = "User-Agent")
+        request.timeoutInterval = 15.0
+        val task = NSURLSession.sharedSession.dataTaskWithRequest(request) { data, response, error ->
+            val status = (response as? NSHTTPURLResponse)?.statusCode
+            cont.resume(if (error == null && data != null && status == 200L) data.toByteArray() else null)
         }
         cont.invokeOnCancellation { task.cancel() }
         task.resume()

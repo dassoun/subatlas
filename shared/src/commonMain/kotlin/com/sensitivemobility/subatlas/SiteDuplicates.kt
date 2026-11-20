@@ -85,7 +85,7 @@ private fun DuplicateGroupCard(state: AppState, group: List<DiveSite>, onExport:
                         Text(
                             listOfNotNull(
                                 site.countryText().takeIf { site.country.isNotBlank() },
-                                if (la != null && lo != null) "📍 " + formatCoords(la, lo) else s.noPositionShort,
+                                if (la != null && lo != null) formatCoords(la, lo) else s.noPositionShort,
                                 s.diveCount(diveCount).takeIf { diveCount > 0 },
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
@@ -127,7 +127,7 @@ internal fun ConfirmMergeDialog(
     val moved = state.dives.count { d -> others.any { it.id == d.siteId } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Text("⚠️") },
+        icon = { Pictogram(Picto.WARNING, size = 28.dp, tint = StatusWarn) },
         title = { Text(s.mergeSitesTitle, color = MaterialTheme.colorScheme.error) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,7 +167,7 @@ internal fun PickSiteToMergeDialog(state: AppState, keeper: DiveSite, onPick: (D
                             Text(
                                 listOfNotNull(
                                     site.countryText().takeIf { site.country.isNotBlank() },
-                                    if (la != null && lo != null) "📍 " + formatCoords(la, lo) else s.noPositionShort,
+                                    if (la != null && lo != null) formatCoords(la, lo) else s.noPositionShort,
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                             )

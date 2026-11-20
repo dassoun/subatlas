@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -98,6 +100,8 @@ import kotlinx.coroutines.launch
 private const val SPLASH_DURATION_MS = 1500L
 
 private sealed interface Screen {
+    /** Accueil : tableau de bord du carnet. */
+    data object Home : Screen
     data object Dives : Screen
     data object Sites : Screen
     data object Centers : Screen
@@ -109,6 +113,8 @@ private sealed interface Screen {
     data class DiveDetail(val id: Long) : Screen
     data class DiveForm(val id: Long?, val siteId: Long?) : Screen
     data class SiteDetail(val id: Long) : Screen
+    /** Carte des sites dont les identifiants sont donnés. */
+    data class SitesMap(val siteIds: List<Long>) : Screen
     data class SiteForm(val id: Long?) : Screen
     data class ChecklistDetail(val id: Long) : Screen
     data class CenterDetail(val id: Long) : Screen
@@ -137,12 +143,17 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val systemLanguage = remember { actions.systemLanguage() }
     val state = remember { AppState(storage, systemLanguage) }
     val strings = stringsFor(state.settings.language, systemLanguage)
-    val stack = remember { mutableStateListOf<Screen>(Screen.Dives) }
+    val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
     // Position de défilement de chaque liste, conservée quand on ouvre une fiche puis qu'on revient.
+    val homeScroll = rememberScrollState()
     val divesListState = rememberLazyListState()
     val sitesListState = rememberLazyListState()
     // Recherche de la liste des sites, conservée en ouvrant une fiche puis en revenant.
     var sitesQuery by remember { mutableStateOf("") }
+    // Filtre par pays de la liste des sites (clé de [countryKey], `null` : tous les pays), conservé de la même façon.
+    var sitesCountry by remember { mutableStateOf<String?>(null) }
+    // Carte des sites : position et site sélectionné, conservés en ouvrant la fiche d'un site puis en revenant.
+    val sitesMapView = remember { MapViewState() }
     val centersListState = rememberLazyListState()
     val checklistsListState = rememberLazyListState()
     val current = stack.last()
@@ -193,7 +204,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 try {
                     incomingReading = true
                     val file = try {
-                        withContext(Dispatchers.Default) { ShearwaterImport.parse(incomingFile) }
+                        withContext(Dispatchers.Default) { if (DivelogsImport.looksLikeZip(incomingFile)) DivelogsImport.parse(incomingFile) else ShearwaterImport.parse(incomingFile) }
                     } finally {
                         incomingReading = false
                     }
@@ -210,6 +221,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     throw e
                 } catch (e: ShearwaterImport.NotShearwaterException) {
                     notice = strings.shearwaterInvalid
+                } catch (e: DivelogsImport.NotDivelogsException) {
+                    notice = strings.divelogsInvalid
                 } catch (e: Exception) {
                     notice = strings.importFailed(e.message ?: strings.unknownError)
                 }
@@ -223,6 +236,30 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             if (actions.saveTextFile(name, state.exportJson())) strings.dataExported else null
         } catch (e: Exception) {
             strings.exportFailed(e.message ?: strings.unknownError)
+        }
+    }
+
+    fun startExportSites() = scope.launch {
+        val name = "subatlas-sites-" + Clock.System.now().toString().take(10) + ".json"
+        notice = try {
+            if (actions.saveTextFile(name, SitesExchange.encode(state.sites.toList(), Clock.System.now().toString()))) strings.sitesExported else null
+        } catch (e: Exception) {
+            strings.exportFailed(e.message ?: strings.unknownError)
+        }
+    }
+
+    fun startImportSites() = scope.launch {
+        try {
+            val text = actions.openTextFile() ?: return@launch
+            val incoming = SitesExchange.decode(text)
+            notice = if (incoming == null) {
+                strings.sitesImportInvalid
+            } else {
+                val r = state.importSites(incoming)
+                strings.sitesImported(r.added, r.updated, r.unchanged, r.ignored)
+            }
+        } catch (e: Exception) {
+            notice = strings.importFailed(e.message ?: strings.unknownError)
         }
     }
 
@@ -243,11 +280,13 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             state.updateSettings { it.copy(chartSeries = if (series in it.chartSeries) it.chartSeries - series else it.chartSeries + series) }
         },
     ) {
+        ScreenTransition(current, stack.size, animated = current !is Screen.SitesMap) {
         when (current) {
-            Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Safety, Screen.Settings -> Scaffold(
+            Screen.Home, Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Safety, Screen.Settings -> Scaffold(
                 topBar = {
                     Bar(
                         when (current) {
+                            Screen.Home -> strings.homeTitle
                             Screen.Dives -> if (state.dives.isEmpty()) strings.divesTitle else "${strings.divesTitle} (${state.dives.size})"
                             Screen.Sites -> strings.sitesTitle
                             Screen.Centers -> strings.centersTitle
@@ -260,52 +299,70 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 },
                 bottomBar = {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        NavigationBarItem(
-                            selected = current == Screen.Dives,
-                            onClick = { goTab(Screen.Dives) },
-                            icon = { Text("🤿") },
-                            label = { TabLabel(strings.tabDives) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = current == Screen.Sites,
-                            onClick = { goTab(Screen.Sites) },
-                            icon = { Text("📍") },
-                            label = { TabLabel(strings.tabSites) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = current == Screen.Centers,
-                            onClick = { goTab(Screen.Centers) },
-                            icon = { Text("⚓") },
-                            label = { TabLabel(strings.tabCenters) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = current == Screen.Checklists,
-                            onClick = { goTab(Screen.Checklists) },
-                            icon = { Text("✅") },
-                            label = { TabLabel(strings.tabChecklists) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = current == Screen.Safety,
-                            onClick = { goTab(Screen.Safety) },
-                            icon = { Text("🛟") },
-                            label = { TabLabel(strings.tabSafety) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = current == Screen.Settings,
-                            onClick = { goTab(Screen.Settings) },
-                            icon = { Text("⚙️") },
-                            label = { TabLabel(strings.tabSettings) },
-                            alwaysShowLabel = false,
-                        )
+                        // Sept onglets : une marge de chaque côté, pour que la pastille de l'onglet actif ne soit pas rognée aux bords.
+                        Row(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                            NavigationBarItem(
+                                selected = current == Screen.Home,
+                                onClick = { goTab(Screen.Home) },
+                                icon = { Pictogram(Picto.HOME, size = 26.dp, filled = current == Screen.Home) },
+                                label = { TabLabel(strings.tabHome) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Dives,
+                                onClick = { goTab(Screen.Dives) },
+                                icon = { Pictogram(Picto.MASK, size = 26.dp, filled = current == Screen.Dives) },
+                                label = { TabLabel(strings.tabDives) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Sites,
+                                onClick = { goTab(Screen.Sites) },
+                                icon = { Pictogram(Picto.PIN, size = 26.dp, filled = current == Screen.Sites) },
+                                label = { TabLabel(strings.tabSites) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Centers,
+                                onClick = { goTab(Screen.Centers) },
+                                icon = { Pictogram(Picto.ANCHOR, size = 26.dp, filled = current == Screen.Centers) },
+                                label = { TabLabel(strings.tabCenters) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Checklists,
+                                onClick = { goTab(Screen.Checklists) },
+                                icon = { Pictogram(Picto.LIST, size = 26.dp, filled = current == Screen.Checklists) },
+                                label = { TabLabel(strings.tabChecklists) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Safety,
+                                onClick = { goTab(Screen.Safety) },
+                                icon = { Pictogram(Picto.BUOY, size = 26.dp, filled = current == Screen.Safety) },
+                                label = { TabLabel(strings.tabSafety) },
+                                alwaysShowLabel = false,
+                            )
+                            NavigationBarItem(
+                                selected = current == Screen.Settings,
+                                onClick = { goTab(Screen.Settings) },
+                                icon = { Pictogram(Picto.GEAR, size = 26.dp, filled = current == Screen.Settings) },
+                                label = { TabLabel(strings.tabSettings) },
+                                alwaysShowLabel = false,
+                            )
+                        }
                     }
                 },
             ) { pad ->
                 when (current) {
+                    Screen.Home ->
+                        HomeScreen(
+                            state, pad, homeScroll,
+                            onOpenDive = { push(Screen.DiveDetail(it)) },
+                            onOpenSite = { push(Screen.SiteDetail(it)) },
+                            onAddDive = { push(Screen.DiveForm(null, null)) },
+                            onShowMap = { ids -> sitesMapView.reset(); push(Screen.SitesMap(ids)) },
+                        )
                     Screen.Dives ->
                         DiveList(
                             state, pad,
@@ -316,12 +373,23 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             listState = divesListState,
                         )
                     Screen.Sites ->
-                        SiteList(state, pad, onOpen = { push(Screen.SiteDetail(it)) }, onAdd = { push(Screen.SiteForm(null)) }, onDuplicates = { push(Screen.SiteDuplicates) }, listState = sitesListState, query = sitesQuery, onQuery = { sitesQuery = it })
+                        SiteList(
+                            state, pad,
+                            onOpen = { push(Screen.SiteDetail(it)) },
+                            onAdd = { push(Screen.SiteForm(null)) },
+                            onDuplicates = { push(Screen.SiteDuplicates) },
+                            onMap = { ids -> sitesMapView.reset(); push(Screen.SitesMap(ids)) },
+                            listState = sitesListState,
+                            query = sitesQuery,
+                            onQuery = { sitesQuery = it },
+                            country = sitesCountry,
+                            onCountry = { sitesCountry = it },
+                        )
                     Screen.Centers ->
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
                     Screen.Safety -> SafetyList(pad, actions, onOpen = { push(Screen.SafetyDetail(it)) })
-                    else -> SettingsScreen(state, pad, onExport = ::startExport, onImport = ::startImport)
+                    else -> SettingsScreen(state, actions, pad, onExport = ::startExport, onImport = ::startImport, onExportSites = ::startExportSites, onImportSites = ::startImportSites)
                 }
             }
 
@@ -398,7 +466,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     topBar = { Bar(site.name, ::pop) },
                 ) { pad ->
                     SiteDetailView(
-                        site, state.divesAt(site.id), pad, actions,
+                        state, site, state.divesAt(site.id), pad, actions,
                         onEdit = { push(Screen.SiteForm(site.id)) },
                         onDelete = { state.deleteSite(site.id); pop() },
                         onMerge = { mergePick = true },
@@ -415,6 +483,16 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             onDismiss = { mergeWith = null },
                         )
                     }
+                }
+            }
+
+            is Screen.SitesMap -> {
+                val mapSites = current.siteIds.mapNotNull(state::site)
+                Scaffold(topBar = { Bar(strings.mapTitle(mapSites.size), ::pop) }) { pad ->
+                    SitesMapScreen(
+                        mapSites, state.dives.groupingBy { it.siteId }.eachCount(), sitesMapView, actions, pad,
+                        onOpen = { push(Screen.SiteDetail(it)) },
+                    )
                 }
             }
 
@@ -459,6 +537,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     ChecklistView(state, list, pad, onDeleted = ::pop)
                 }
             }
+        }
         }
 
         if (incomingReading) ReadingDialog()
@@ -566,7 +645,15 @@ private fun ImportDialog(data: ImportData, onMerge: () -> Unit, onReplace: () ->
 // -------------------------------------------------------------- Réglages
 
 @Composable
-private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> Unit, onImport: () -> Unit) {
+private fun SettingsScreen(
+    state: AppState,
+    actions: PlatformActions,
+    pad: PaddingValues,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onExportSites: () -> Unit,
+    onImportSites: () -> Unit,
+) {
     val s = LocalStrings.current
     val scroll = rememberScrollState()
     var advanced by remember { mutableStateOf(false) }
@@ -632,24 +719,31 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
         Text(s.ascentHint, style = MaterialTheme.typography.bodyMedium)
         val ascent = state.settings.ascent
         fun set(transform: (AscentScale) -> AscentScale) = state.updateSettings { it.copy(ascent = transform(it.ascent)) }
-        Text(s.ascentLevel(1), style = MaterialTheme.typography.bodyLarge)
-        Stepper(s.ascentLimit(ascent.yellowAbove), { set { a -> a.copy(yellowAbove = (a.yellowAbove - 1).coerceAtLeast(1)) } },
-            { set { a -> a.copy(yellowAbove = (a.yellowAbove + 1).coerceAtMost(a.orangeAbove - 1)) } })
-        ColorChoice(ASCENT_PALETTE, ascent.yellowColor, null) { i -> set { a -> a.copy(yellowColor = i) } }
-        Text(s.ascentLevel(2), style = MaterialTheme.typography.bodyLarge)
-        Stepper(s.ascentLimit(ascent.orangeAbove), { set { a -> a.copy(orangeAbove = (a.orangeAbove - 1).coerceAtLeast(a.yellowAbove + 1)) } },
-            { set { a -> a.copy(orangeAbove = (a.orangeAbove + 1).coerceAtMost(a.redAbove - 1)) } })
-        ColorChoice(ASCENT_PALETTE, ascent.orangeColor, null) { i -> set { a -> a.copy(orangeColor = i) } }
-        Text(s.ascentLevel(3), style = MaterialTheme.typography.bodyLarge)
-        Stepper(s.ascentLimit(ascent.redAbove), { set { a -> a.copy(redAbove = (a.redAbove - 1).coerceAtLeast(a.orangeAbove + 1)) } },
-            { set { a -> a.copy(redAbove = (a.redAbove + 1).coerceAtMost(99)) } })
-        ColorChoice(ASCENT_PALETTE, ascent.redColor, null) { i -> set { a -> a.copy(redColor = i) } }
-        TextButton(onClick = { set { AscentScale() } }) { Text(s.ascentReset) }
+        // Une rangée par seuil, du plus bas au plus haut : valeur, couleur, et un bouton pour le retirer.
+        ascent.levels.forEachIndexed { i, level ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(s.ascentLevel(i + 1), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { set { a -> a.removed(i) } }) { Text(s.ascentRemove, color = MaterialTheme.colorScheme.error) }
+            }
+            Stepper(s.ascentLimit(level.above), { set { a -> a.stepped(i, -1) } }, { set { a -> a.stepped(i, +1) } })
+            ColorChoice(ASCENT_PALETTE, level.color, null) { c -> set { a -> a.recolored(i, c) } }
+        }
+        if (ascent.levels.isEmpty()) Text(s.ascentNone, style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { set { a -> a.added() } }, enabled = ascent.canAdd()) { Text(s.ascentAdd) }
+            TextButton(onClick = { set { AscentScale() } }) { Text(s.ascentReset) }
+        }
 
         SectionTitle(s.dataSection)
         Text(s.dataHint, style = MaterialTheme.typography.bodyMedium)
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text(s.exportData) }
+        OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text(s.exportData) }
         OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text(s.importData) }
+        Text(s.sitesHint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        OutlinedButton(onClick = onExportSites, modifier = Modifier.fillMaxWidth()) { Text(s.exportSites) }
+        OutlinedButton(onClick = onImportSites, modifier = Modifier.fillMaxWidth()) { Text(s.importSites) }
+        // Imports depuis d'autres applications : regroupés sous leur propre intitulé.
+        Text(s.importFromApps, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+        DiveImportButtons(state, actions)
 
         // Section repliée par défaut : les actions dangereuses ne sont pas à portée d'un appui distrait.
         var confirmDelete by remember { mutableStateOf(false) }
@@ -662,7 +756,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f)) { SectionTitle(s.advancedSection) }
-            Text(if (advanced) "▴" else "▾", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Pictogram(if (advanced) Picto.CHEVRON_UP else Picto.CHEVRON_DOWN, size = 22.dp, tint = MaterialTheme.colorScheme.primary)
         }
         if (advanced) {
             // 7 appuis rapprochés sur ce libellé : déverrouille les fonctions réservées au développement.
@@ -687,7 +781,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
                 ),
-            ) { Text("⚠️ " + s.deleteAllDives) }
+            ) { PictoText(s.deleteAllDives, Picto.WARNING) }
             AnimatedVisibility(
                 visible = devMode,
                 enter = androidx.compose.animation.expandVertically(tween(450)) + androidx.compose.animation.fadeIn(tween(450)),
@@ -703,7 +797,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
                             containerColor = MaterialTheme.colorScheme.error,
                             contentColor = MaterialTheme.colorScheme.onError,
                         ),
-                    ) { Text("⚠️ " + s.deleteNoGps) }
+                    ) { PictoText(s.deleteNoGps, Picto.WARNING) }
                 }
             }
         }
@@ -712,7 +806,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
             val diveCount = state.dives.count { it.siteId in doomed }
             AlertDialog(
                 onDismissRequest = { confirmNoGps = false },
-                icon = { Text("⚠️", fontSize = 32.sp) },
+                icon = { Pictogram(Picto.WARNING, size = 32.dp, tint = StatusWarn) },
                 title = { Text(s.deleteNoGpsTitle, color = MaterialTheme.colorScheme.error) },
                 text = { Text(s.deleteNoGpsMessage(doomed.size, diveCount)) },
                 confirmButton = {
@@ -730,7 +824,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
         deletedSites?.let { n ->
             AlertDialog(
                 onDismissRequest = { deletedSites = null },
-                icon = { Text("✅", fontSize = 32.sp) },
+                icon = { Pictogram(Picto.CHECK_CIRCLE, size = 32.dp, tint = StatusOk) },
                 title = { Text(s.deleteNoGpsDoneTitle) },
                 text = { Text(s.deleteNoGpsDone(n)) },
                 confirmButton = { TextButton(onClick = { deletedSites = null }) { Text(s.ok) } },
@@ -739,7 +833,7 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
         if (confirmDelete) {
             AlertDialog(
                 onDismissRequest = { confirmDelete = false },
-                icon = { Text("⚠️", fontSize = 32.sp) },
+                icon = { Pictogram(Picto.WARNING, size = 32.dp, tint = StatusWarn) },
                 title = { Text(s.deleteAllTitle, color = MaterialTheme.colorScheme.error) },
                 text = { Text(s.deleteAllMessage(state.dives.size)) },
                 confirmButton = {
@@ -770,9 +864,9 @@ private fun SettingsScreen(state: AppState, pad: PaddingValues, onExport: () -> 
 @Composable
 private fun Stepper(text: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = onMinus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Text("−") }
+        OutlinedButton(onClick = onMinus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Pictogram(Picto.MINUS, size = 18.dp) }
         Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 130.dp))
-        OutlinedButton(onClick = onPlus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Text("+") }
+        OutlinedButton(onClick = onPlus, modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) { Pictogram(Picto.PLUS, size = 18.dp) }
     }
 }
 
@@ -806,7 +900,7 @@ private fun ColorChoice(palette: List<Long>, selected: Int, noneLabel: String?, 
 /** Libellé d'un onglet : sur une seule ligne et un peu plus petit, seul l'onglet actif affiche son libellé. */
 @Composable
 private fun TabLabel(text: String) {
-    Text(text, fontSize = 11.sp, maxLines = 1, softWrap = false)
+    Text(text, fontSize = 10.sp, maxLines = 1, softWrap = false)
 }
 
 @Composable
@@ -843,30 +937,117 @@ private fun BackArrow(onClick: () -> Unit) {
 
 // ---------------------------------------------------------------- Sites
 
+/** Un pays proposé par le filtre de la liste des sites : clé de [countryKey] (vide : sites sans pays), libellé, nombre de sites. */
+private class CountryChoice(val key: String, val label: String, val count: Int)
+
+/** Pays présents parmi [sites], du plus fourni au moins fourni ; les sites sans pays viennent en dernier. */
+private fun countryChoices(sites: List<DiveSite>, french: Boolean, noCountryLabel: String): List<CountryChoice> =
+    sites.groupBy { countryKey(it.country) }
+        .map { (key, group) ->
+            CountryChoice(key, if (key.isEmpty()) noCountryLabel else countryLabel(key, french, group.first().country), group.size)
+        }
+        .sortedWith(compareBy<CountryChoice> { it.key.isEmpty() }.thenByDescending { it.count }.thenBy { it.label.lowercase() })
+
 @Composable
-private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, onDuplicates: () -> Unit, listState: LazyListState, query: String, onQuery: (String) -> Unit) {
+private fun SiteList(
+    state: AppState,
+    pad: PaddingValues,
+    onOpen: (Long) -> Unit,
+    onAdd: () -> Unit,
+    onDuplicates: () -> Unit,
+    onMap: (List<Long>) -> Unit,
+    listState: LazyListState,
+    query: String,
+    onQuery: (String) -> Unit,
+    country: String?,
+    onCountry: (String?) -> Unit,
+) {
     val s = LocalStrings.current
     val duplicateCount = remember(state.sites.toList(), state.settings.distinctSites) { state.siteDuplicateGroups().size }
+    val choices = remember(state.sites.toList(), s.languageCode) { countryChoices(state.sites.toList(), s.languageCode == "fr", s.noCountry) }
+    // Un pays qui n'a plus aucun site (supprimés ou renommés) ne filtre plus rien.
+    val activeCountry = country?.takeIf { key -> choices.any { it.key == key } }
     // Recherche sur le nom et le pays, sans tenir compte des accents ni de la casse.
     val needle = normalizeSiteName(query)
-    val shown = if (needle.isEmpty()) state.sites.toList() else state.sites.filter {
-        normalizeSiteName(it.name + " " + it.countryText()).contains(needle)
+    val shown = state.sites.filter { site ->
+        (activeCountry == null || countryKey(site.country) == activeCountry) &&
+            (needle.isEmpty() || normalizeSiteName(site.name + " " + site.countryText()).contains(needle))
     }
+
+    // Choix de l'affichage sur la carte : tous les sites de la liste ou seulement ceux qui ont une plongée.
+    var mapChoice by remember { mutableStateOf<Pair<List<Long>, List<Long>>?>(null) }
+    var mapNothing by remember { mutableStateOf(false) }
+    fun showMap() {
+        // Seuls les sites positionnés peuvent figurer sur la carte.
+        val located = shown.filter { it.latitude != null && it.longitude != null }
+        val dived = state.dives.mapTo(HashSet()) { it.siteId }
+        val withDives = located.filter { it.id in dived }
+        when {
+            located.isEmpty() -> mapNothing = true
+            // Pas de question à poser quand les deux choix donneraient la même carte, ou une carte vide.
+            withDives.isEmpty() || withDives.size == located.size -> onMap(located.map { it.id })
+            else -> mapChoice = located.map { it.id } to withDives.map { it.id }
+        }
+    }
+    mapChoice?.let { (all, withDives) ->
+        AlertDialog(
+            onDismissRequest = { mapChoice = null },
+            title = { Text(s.mapWhichSitesTitle) },
+            text = { Text(s.mapWhichSitesMessage(all.size - withDives.size)) },
+            confirmButton = { TextButton(onClick = { mapChoice = null; onMap(all) }) { Text(s.mapAllSites(all.size)) } },
+            dismissButton = { TextButton(onClick = { mapChoice = null; onMap(withDives) }) { Text(s.mapDivedSites(withDives.size)) } },
+        )
+    }
+    if (mapNothing) {
+        AlertDialog(
+            onDismissRequest = { mapNothing = false },
+            text = { Text(s.mapNoPosition) },
+            confirmButton = { TextButton(onClick = { mapNothing = false }) { Text(s.ok) } },
+        )
+    }
+
     Column(Modifier.fillMaxSize().padding(pad)) {
-        if (state.sites.isEmpty()) {
-            Text(
-                s.noSites,
-                modifier = Modifier.padding(16.dp),
-            )
-        } else {
-            OutlinedTextField(
-                query, onQuery,
-                placeholder = { Text(s.searchSites) },
-                singleLine = true,
-                trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { onQuery("") }) { Text("✕") } },
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
-            )
-            if (shown.isEmpty()) Text(s.noSiteFound, modifier = Modifier.padding(16.dp))
+        if (state.sites.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    query, onQuery,
+                    placeholder = { Text(s.searchSites) },
+                    singleLine = true,
+                    trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { onQuery("") }) { Pictogram(Picto.CLOSE, size = 18.dp) } },
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalIconButton(
+                    onClick = ::showMap,
+                    modifier = Modifier.size(56.dp).semantics { contentDescription = s.showOnMap },
+                ) { Pictogram(Picto.MAP, size = 26.dp) }
+            }
+            // Filtre par pays : inutile tant que les sites sont tous du même pays.
+            if (choices.size > 1) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    item {
+                        FilterChip(
+                            selected = activeCountry == null,
+                            onClick = { onCountry(null) },
+                            label = { Text("${s.allCountries} (${state.sites.size})") },
+                        )
+                    }
+                    items(choices, key = { it.key }) { choice ->
+                        FilterChip(
+                            selected = activeCountry == choice.key,
+                            onClick = { onCountry(if (activeCountry == choice.key) null else choice.key) },
+                            label = { Text("${choice.label} (${choice.count})") },
+                        )
+                    }
+                }
+            }
         }
         LazyColumn(
             Modifier.weight(1f),
@@ -874,6 +1055,12 @@ private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Aucun site du tout, ou aucun qui corresponde à la recherche et au pays choisis.
+            if (state.sites.isEmpty()) {
+                item(key = "empty") { EmptyState(Picto.PIN, s.noSites, Modifier.fillParentMaxSize()) }
+            } else if (shown.isEmpty()) {
+                item(key = "empty") { EmptyState(Picto.SEARCH, s.noSiteFound, Modifier.fillParentMaxWidth()) }
+            }
             items(shown, key = { it.id }) { site ->
                 Card(
                     onClick = { onOpen(site.id) },
@@ -915,6 +1102,7 @@ private fun SiteList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit
 
 @Composable
 private fun SiteDetailView(
+    state: AppState,
     site: DiveSite,
     dives: List<Dive>,
     pad: PaddingValues,
@@ -927,6 +1115,7 @@ private fun SiteDetailView(
 ) {
     val s = LocalStrings.current
     var confirm by remember { mutableStateOf(false) }
+    var photoViewer by remember { mutableStateOf<Int?>(null) }
     val lat = site.latitude
     val lon = site.longitude
     Column(
@@ -948,10 +1137,16 @@ private fun SiteDetailView(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(s.openInMaps) }
         }
+        // Les photos de toutes les plongées du site, la plus récente d'abord (lecture seule : on les gère depuis la plongée).
+        val sitePhotos = dives.flatMap { it.photos }
+        if (sitePhotos.isNotEmpty()) PhotoStrip(state, sitePhotos, s.sitePhotos, onOpen = { photoViewer = it })
         SiteDivesSection(dives, onOpenDive)
         OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text(s.edit) }
         OutlinedButton(onClick = onMerge, modifier = Modifier.fillMaxWidth()) { Text(s.mergeWithOther) }
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
+    }
+    photoViewer?.let { start ->
+        PhotoViewer(state, dives.flatMap { it.photos }, start, actions, onClose = { photoViewer = null })
     }
     if (confirm) {
         ConfirmDialog(
@@ -1023,7 +1218,7 @@ private fun SiteForm(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("\uD83D\uDD0E  " + s.findCoords) }
+        ) { PictoText(s.findCoords, Picto.SEARCH) }
         Text(s.positionOptionalHint, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
             depth, { depth = it.filter(Char::isDigit) }, label = { Text(s.maxDepthField) }, singleLine = true,
@@ -1263,7 +1458,7 @@ private fun ChecklistView(state: AppState, list: Checklist, pad: PaddingValues, 
                         }
                     }
                     TriStateBox(item.state) { state.cycleItem(list.id, item.id) }
-                    TextButton(onClick = { itemToDelete = item }) { Text("✕") }
+                    TextButton(onClick = { itemToDelete = item }) { Pictogram(Picto.CLOSE, size = 18.dp) }
                 }
                 HorizontalDivider()
             }
@@ -1366,12 +1561,12 @@ private fun TriStateBox(state: ItemState, onClick: () -> Unit) {
 // --------------------------------------------------------------- Dialogs
 
 @Composable
-internal fun ConfirmDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun ConfirmDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit, confirmLabel: String? = null) {
     val s = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
         text = { Text(text) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(s.delete) } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel ?: s.delete) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
     )
 }

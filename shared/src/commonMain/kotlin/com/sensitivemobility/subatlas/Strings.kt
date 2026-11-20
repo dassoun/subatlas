@@ -35,6 +35,24 @@ interface Strings {
     val noSites: String
     val searchSites: String
     val noSiteFound: String
+    val allCountries: String
+    val noCountry: String
+    val showOnMap: String
+    fun mapTitle(count: Int): String
+    val mapWhichSitesTitle: String
+    fun mapWhichSitesMessage(withoutDives: Int): String
+    fun mapAllSites(count: Int): String
+    fun mapDivedSites(count: Int): String
+    val mapNoPosition: String
+    val mapOffline: String
+    val mapCredit: String
+    val mapZoomIn: String
+    val mapZoomOut: String
+    val mapSatelliteView: String
+    val mapPlanView: String
+    val mapSatelliteFailed: String
+    val mapNoDive: String
+    val mapOpenSite: String
     val addSite: String
     fun maxDepthShort(meters: Int): String
     fun access(access: SiteAccess): String
@@ -101,6 +119,28 @@ interface Strings {
     // Plongées
     val tabDives: String
     val divesTitle: String
+
+    // Accueil (tableau de bord)
+    val tabHome: String
+    val homeTitle: String
+    fun homeDives(count: Int): String
+    fun homeUnderwater(time: String): String
+    fun daysText(days: Int): String
+    fun hoursText(hours: Int): String
+    fun minutesText(minutes: Int): String
+    fun homeTimedNote(timed: Int, total: Int): String
+    val homeEmptyTitle: String
+    val homeEmptyText: String
+    val homeSitesTile: String
+    val homeCountriesTile: String
+    val homeDeepest: String
+    val homeLongest: String
+    val homeColdest: String
+    val homeFavourite: String
+    val homeByYear: String
+    val homeCountries: String
+    val homeLast: String
+    val homeShowMap: String
     val unsavedTitle: String
     val unsavedMessage: String
     val unsavedDiscard: String
@@ -109,6 +149,9 @@ interface Strings {
     val noDives: String
     val addDive: String
     fun formatDate(date: LocalDate): String
+
+    /** « Novembre 2026 » : titre d'un groupe de plongées dans la liste. */
+    fun monthYear(date: LocalDate): String
     fun diveCount(count: Int): String
     fun tankCount(count: Int): String
     fun minutesShort(minutes: Int): String
@@ -129,6 +172,10 @@ interface Strings {
     val shareIntroMany: String
     val usedMinutesLabel: String
     val importShearwater: String
+    val importDivelogs: String
+    val divelogsTitle: String
+    val divelogsInvalid: String
+    val divelogsMergeHelp: String
     val shearwaterTitle: String
     fun shearwaterFound(total: Int, created: Int, merged: Int): String
     val shearwaterNone: String
@@ -175,6 +222,24 @@ interface Strings {
     val shareBySms: String
     val shareByEmail: String
     val shareFileButton: String
+    val shareImageButton: String
+    val shareImageTitle: String
+    val shareImageIntro: String
+    val shareImageAction: String
+    val shareImageFailed: String
+    val photosTitle: String
+    val photosAdd: String
+    fun photoCount(count: Int): String
+    val photoMakeCover: String
+    val photoShare: String
+    val photoUnlink: String
+    val photoUnlinkConfirm: String
+    val photoUnlinkAction: String
+    val photoDeleteDevice: String
+    val photoDeleteDeviceConfirm: String
+    val photoDeleteDeviceFailed: String
+    val photoClose: String
+    val sitePhotos: String
     val shareFileIntroNone: String
     val pickContact: String
     val shareOther: String
@@ -275,6 +340,7 @@ interface Strings {
     val themeDark: String
     val languageSection: String
     val kindColorsSection: String
+    val kindNone: String
     val kindColorsHint: String
     val colorNone: String
     val ascentSection: String
@@ -282,6 +348,9 @@ interface Strings {
     fun ascentLevel(i: Int): String
     fun ascentLimit(v: Int): String
     val ascentReset: String
+    val ascentAdd: String
+    val ascentRemove: String
+    val ascentNone: String
     val tabSafety: String
     val safetyTitle: String
     val emergencyTitle: String
@@ -295,8 +364,15 @@ interface Strings {
     val safetyCards: List<SafetyCard>
     val languageSystem: String
     val dataSection: String
+    val importFromApps: String
     val dataHint: String
     val exportData: String
+    val exportSites: String
+    val importSites: String
+    val sitesHint: String
+    val sitesExported: String
+    val sitesImportInvalid: String
+    fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int): String
     val importData: String
 
     // Export / import
@@ -339,6 +415,26 @@ object FrStrings : Strings {
     override val editSite = "Modifier le site"
     override val searchSites = "Rechercher un site"
     override val noSiteFound = "Aucun site ne correspond."
+    override val allCountries = "Tous les pays"
+    override val noCountry = "Sans pays"
+    override val showOnMap = "Voir les sites sur la carte"
+    override fun mapTitle(count: Int) = "Carte · $count site${if (count > 1) "s" else ""}"
+    override val mapWhichSitesTitle = "Quels sites afficher ?"
+    override fun mapWhichSitesMessage(withoutDives: Int) =
+        if (withoutDives == 1) "1 site n'a aucune plongée rattachée. Afficher tous les sites enregistrés dans l'appli, ou seulement ceux qui ont au moins une plongée ?"
+        else "$withoutDives sites n'ont aucune plongée rattachée. Afficher tous les sites enregistrés dans l'appli, ou seulement ceux qui ont au moins une plongée ?"
+    override fun mapAllSites(count: Int) = "Tous les sites ($count)"
+    override fun mapDivedSites(count: Int) = "Avec plongée ($count)"
+    override val mapNoPosition = "Aucun site de cette liste n'a de position GPS : il n'y a rien à afficher sur la carte."
+    override val mapOffline = "Fond de carte indisponible : vérifie ta connexion internet. Les sites restent affichés."
+    override val mapCredit = "© contributeurs OpenStreetMap · Natural Earth"
+    override val mapZoomIn = "Zoomer"
+    override val mapZoomOut = "Dézoomer"
+    override val mapSatelliteView = "Vue satellite"
+    override val mapPlanView = "Revenir au plan"
+    override val mapSatelliteFailed = "La vue satellite ne s'est pas chargée (réseau, clé Google refusée ou quota). Plan affiché."
+    override val mapNoDive = "Aucune plongée"
+    override val mapOpenSite = "Ouvrir la fiche"
     override val noSites = "Aucun site pour l'instant.\nAppuyez sur « Ajouter un site » pour enregistrer votre position GPS."
     override val addSite = "Ajouter un site"
     override fun maxDepthShort(meters: Int) = "max $meters m"
@@ -417,6 +513,26 @@ object FrStrings : Strings {
 
     override val tabDives = "Plongées"
     override val divesTitle = "Mes plongées"
+    override val tabHome = "Accueil"
+    override val homeTitle = "Accueil"
+    override fun homeDives(count: Int) = if (count > 1) "plongées" else "plongée"
+    override fun homeUnderwater(time: String) = "$time sous l'eau"
+    override fun daysText(days: Int) = if (days > 1) "$days jours" else "$days jour"
+    override fun hoursText(hours: Int) = if (hours > 1) "$hours heures" else "$hours heure"
+    override fun minutesText(minutes: Int) = if (minutes > 1) "$minutes minutes" else "$minutes minute"
+    override fun homeTimedNote(timed: Int, total: Int) = "Durée connue pour $timed plongées sur $total."
+    override val homeEmptyTitle = "Bienvenue dans SubAtlas"
+    override val homeEmptyText = "Aucune plongée pour l'instant. Ajoutez-en une, ou importez vos plongées depuis Shearwater : vos statistiques apparaîtront ici."
+    override val homeSitesTile = "Sites visités"
+    override val homeCountriesTile = "Pays"
+    override val homeDeepest = "Profondeur max"
+    override val homeLongest = "Plongée la plus longue"
+    override val homeColdest = "Eau la plus froide"
+    override val homeFavourite = "Site favori"
+    override val homeByYear = "Plongées par année"
+    override val homeCountries = "Pays visités"
+    override val homeLast = "Dernière plongée"
+    override val homeShowMap = "Voir mes sites sur la carte"
     override val unsavedTitle = "Modifications non enregistrées"
     override val unsavedMessage = "Enregistrer cette plongée avant de passer à une autre ?"
     override val unsavedDiscard = "Ignorer"
@@ -426,6 +542,8 @@ object FrStrings : Strings {
     override val addDive = "Ajouter une plongée"
     private val monthsFr = listOf("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
     override fun formatDate(date: LocalDate) = "${date.day} ${monthsFr[date.month.ordinal]} ${date.year}"
+    private val monthsFrLong = listOf("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+    override fun monthYear(date: LocalDate) = "${monthsFrLong[date.month.ordinal].replaceFirstChar { it.uppercase() }} ${date.year}"
     override fun diveCount(count: Int) = "$count plongée${if (count > 1) "s" else ""}"
     override fun tankCount(count: Int) = "$count bouteille${if (count > 1) "s" else ""}"
     override fun minutesShort(minutes: Int) =
@@ -472,6 +590,11 @@ object FrStrings : Strings {
         "Envoie le fichier de la plongée, avec toutes ses données, à chacun : il l'ouvre avec SubAtlas pour l'ajouter à son carnet."
     override val usedMinutesLabel = "Durée d'utilisation"
     override val importShearwater = "Importer depuis Shearwater"
+    override val importDivelogs = "Importer Dive Logs Data"
+    override val divelogsTitle = "Import Dive Logs Data"
+    override val divelogsInvalid = "Ce fichier n'est pas un export Dive Logs Data (.DLD) lisible."
+    override val divelogsMergeHelp =
+        "Une plongée du carnet à la même date et à moins d'une heure est complétée (notes, binôme, visibilité, bouteilles, lestage…) ; rien de ce que vous avez saisi n'est écrasé, et la courbe d'une plongée déjà importée est conservée."
     override val shearwaterTitle = "Import Shearwater"
     override fun shearwaterFound(total: Int, created: Int, merged: Int) =
         "$total plongée${if (total > 1) "s" else ""} dans ce fichier : $created nouvelle${if (created > 1) "s" else ""}, $merged à fusionner avec une plongée du carnet."
@@ -524,6 +647,24 @@ object FrStrings : Strings {
     override val shareBySms = "Envoyer par SMS"
     override val shareByEmail = "Envoyer par e-mail"
     override val shareFileButton = "Envoyer le fichier de la plongée"
+    override val shareImageButton = "Partager en image"
+    override val shareImageTitle = "Image de la plongée"
+    override val shareImageIntro = "Une carte à envoyer ou à poster : le site, la courbe et les chiffres clés."
+    override val shareImageAction = "Partager l'image"
+    override val shareImageFailed = "L'image n'a pas pu être créée ou envoyée."
+    override val photosTitle = "Photos"
+    override val photosAdd = "Ajouter des photos"
+    override fun photoCount(count: Int) = "$count photo${if (count > 1) "s" else ""}"
+    override val photoMakeCover = "Définir comme couverture"
+    override val photoShare = "Partager la photo"
+    override val photoUnlink = "Retirer de la plongée"
+    override val photoUnlinkConfirm = "Retirer cette photo de la plongée ? Votre photo d'origine reste dans la galerie du téléphone."
+    override val photoUnlinkAction = "Retirer"
+    override val photoDeleteDevice = "Supprimer du téléphone"
+    override val photoDeleteDeviceConfirm = "Supprimer cette photo du téléphone ? La photo d'origine sera effacée de la galerie (Android vous demandera de confirmer), et retirée de la plongée."
+    override val photoDeleteDeviceFailed = "La photo n'a pas été supprimée du téléphone : elle reste dans la plongée. Vous pouvez la retirer de la plongée, puis la supprimer depuis la galerie."
+    override val photoClose = "Fermer"
+    override val sitePhotos = "Photos de ce site"
     override val shareFileIntroNone = "Envoie un fichier avec toutes les données de la plongée (courbe, bouteilles, conditions, équipement, notes). Ton binôme l'ouvre avec SubAtlas pour l'ajouter à son carnet."
     override val pickContact = "Choisir dans le répertoire"
     override val shareOther = "Autres applications…"
@@ -631,6 +772,7 @@ object FrStrings : Strings {
     override val themeDark = "Sombre"
     override val languageSection = "Langue"
     override val kindColorsSection = "Couleurs des plongées"
+    override val kindNone = "Type non précisé"
     override val kindColorsHint = "Couleur de fond des cartes de la liste, selon le type de plongée."
     override val colorNone = "Aucune"
     override val ascentSection = "Vitesse de remontée"
@@ -638,6 +780,9 @@ object FrStrings : Strings {
     override fun ascentLevel(i: Int) = "Seuil $i"
     override fun ascentLimit(v: Int) = "au-delà de $v m/min"
     override val ascentReset = "Valeurs par défaut"
+    override val ascentAdd = "Ajouter un seuil"
+    override val ascentRemove = "Retirer"
+    override val ascentNone = "Aucun seuil : la courbe n'est jamais colorée selon la vitesse de remontée."
     override val tabSafety = "Sécurité"
     override val safetyTitle = "Procédures de sécurité"
     override val emergencyTitle = "Urgence : appeler"
@@ -717,8 +862,20 @@ object FrStrings : Strings {
     )
     override val languageSystem = "Système"
     override val dataSection = "Données"
+    override val importFromApps = "Importer depuis d'autres applications"
     override val dataHint = "Enregistrez vos plongées, sites et check-lists dans un fichier, ou restaurez-les depuis une sauvegarde."
     override val exportData = "Exporter les données"
+    override val exportSites = "Exporter les sites"
+    override val importSites = "Importer des sites"
+    override val sitesHint = "Les sites seuls, dans un fichier JSON à importer sur une autre installation : les sites localisés sont ajoutés, et un site déjà connu mais sans position reçoit celle du fichier."
+    override val sitesExported = "Sites exportés."
+    override val sitesImportInvalid = "Ce fichier n'est pas un export de sites de SubAtlas."
+    override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
+        "$added site${if (added > 1) "s" else ""} ajouté${if (added > 1) "s" else ""}",
+        "$updated position${if (updated > 1) "s" else ""} complétée${if (updated > 1) "s" else ""}",
+        "$unchanged déjà à jour",
+        "$ignored sans position (ignoré${if (ignored > 1) "s" else ""})",
+    ).joinToString("\n")
     override val importData = "Importer des données"
 
     override val dataExported = "Données exportées."
@@ -774,6 +931,26 @@ object EnStrings : Strings {
     override val editSite = "Edit site"
     override val searchSites = "Search a site"
     override val noSiteFound = "No matching site."
+    override val allCountries = "All countries"
+    override val noCountry = "No country"
+    override val showOnMap = "Show sites on the map"
+    override fun mapTitle(count: Int) = "Map · $count site${if (count != 1) "s" else ""}"
+    override val mapWhichSitesTitle = "Which sites to show?"
+    override fun mapWhichSitesMessage(withoutDives: Int) =
+        if (withoutDives == 1) "1 site has no dive attached. Show every site saved in the app, or only those with at least one dive?"
+        else "$withoutDives sites have no dive attached. Show every site saved in the app, or only those with at least one dive?"
+    override fun mapAllSites(count: Int) = "All sites ($count)"
+    override fun mapDivedSites(count: Int) = "With dives ($count)"
+    override val mapNoPosition = "None of the sites in this list has a GPS position: there is nothing to show on the map."
+    override val mapOffline = "Map background unavailable: check your internet connection. The sites are still shown."
+    override val mapCredit = "© OpenStreetMap contributors · Natural Earth"
+    override val mapZoomIn = "Zoom in"
+    override val mapZoomOut = "Zoom out"
+    override val mapSatelliteView = "Satellite view"
+    override val mapPlanView = "Back to the map"
+    override val mapSatelliteFailed = "Satellite view did not load (network, Google key refused or quota). Showing the map."
+    override val mapNoDive = "No dive"
+    override val mapOpenSite = "Open the site"
     override val noSites = "No sites yet.\nTap “Add a site” to save your GPS position."
     override val addSite = "Add a site"
     override fun maxDepthShort(meters: Int) = "max $meters m"
@@ -852,6 +1029,26 @@ object EnStrings : Strings {
 
     override val tabDives = "Dives"
     override val divesTitle = "My dives"
+    override val tabHome = "Home"
+    override val homeTitle = "Home"
+    override fun homeDives(count: Int) = if (count != 1) "dives" else "dive"
+    override fun homeUnderwater(time: String) = "$time underwater"
+    override fun daysText(days: Int) = if (days != 1) "$days days" else "$days day"
+    override fun hoursText(hours: Int) = if (hours != 1) "$hours hours" else "$hours hour"
+    override fun minutesText(minutes: Int) = if (minutes != 1) "$minutes minutes" else "$minutes minute"
+    override fun homeTimedNote(timed: Int, total: Int) = "Duration known for $timed of $total dives."
+    override val homeEmptyTitle = "Welcome to SubAtlas"
+    override val homeEmptyText = "No dives yet. Add one, or import your dives from Shearwater: your statistics will show up here."
+    override val homeSitesTile = "Sites visited"
+    override val homeCountriesTile = "Countries"
+    override val homeDeepest = "Max depth"
+    override val homeLongest = "Longest dive"
+    override val homeColdest = "Coldest water"
+    override val homeFavourite = "Favourite site"
+    override val homeByYear = "Dives per year"
+    override val homeCountries = "Countries visited"
+    override val homeLast = "Latest dive"
+    override val homeShowMap = "Show my sites on the map"
     override val unsavedTitle = "Unsaved changes"
     override val unsavedMessage = "Save this dive before moving to another one?"
     override val unsavedDiscard = "Discard"
@@ -861,6 +1058,8 @@ object EnStrings : Strings {
     override val addDive = "Add a dive"
     private val monthsEn = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     override fun formatDate(date: LocalDate) = "${monthsEn[date.month.ordinal]} ${date.day}, ${date.year}"
+    private val monthsEnLong = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    override fun monthYear(date: LocalDate) = "${monthsEnLong[date.month.ordinal]} ${date.year}"
     override fun diveCount(count: Int) = "$count dive${if (count != 1) "s" else ""}"
     override fun tankCount(count: Int) = "$count tank${if (count != 1) "s" else ""}"
     override fun minutesShort(minutes: Int) =
@@ -907,6 +1106,11 @@ object EnStrings : Strings {
         "Send the dive file, with all its data, to each person: they open it with SubAtlas to add it to their logbook."
     override val usedMinutesLabel = "Time on this tank"
     override val importShearwater = "Import from Shearwater"
+    override val importDivelogs = "Import Dive Logs Data"
+    override val divelogsTitle = "Dive Logs Data import"
+    override val divelogsInvalid = "This file is not a readable Dive Logs Data (.DLD) export."
+    override val divelogsMergeHelp =
+        "A logbook dive on the same date within an hour is completed (notes, buddy, visibility, tanks, weight…); nothing you entered is overwritten, and the profile of an already imported dive is kept."
     override val shearwaterTitle = "Shearwater import"
     override fun shearwaterFound(total: Int, created: Int, merged: Int) =
         "$total dive${if (total != 1) "s" else ""} in this file: $created new, $merged to merge with a logbook dive."
@@ -958,6 +1162,24 @@ object EnStrings : Strings {
     override val shareBySms = "Send by SMS"
     override val shareByEmail = "Send by email"
     override val shareFileButton = "Send the dive file"
+    override val shareImageButton = "Share as image"
+    override val shareImageTitle = "Dive image"
+    override val shareImageIntro = "A card to send or post: the site, the profile and the key figures."
+    override val shareImageAction = "Share the image"
+    override val shareImageFailed = "The image could not be created or sent."
+    override val photosTitle = "Photos"
+    override val photosAdd = "Add photos"
+    override fun photoCount(count: Int) = "$count photo${if (count != 1) "s" else ""}"
+    override val photoMakeCover = "Set as cover"
+    override val photoShare = "Share the photo"
+    override val photoUnlink = "Remove from the dive"
+    override val photoUnlinkConfirm = "Remove this photo from the dive? Your original photo stays in the phone's gallery."
+    override val photoUnlinkAction = "Remove"
+    override val photoDeleteDevice = "Delete from the phone"
+    override val photoDeleteDeviceConfirm = "Delete this photo from the phone? The original photo will be erased from the gallery (Android will ask you to confirm), and removed from the dive."
+    override val photoDeleteDeviceFailed = "The photo was not deleted from the phone: it stays in the dive. You can remove it from the dive, then delete it from the gallery."
+    override val photoClose = "Close"
+    override val sitePhotos = "Photos from this site"
     override val shareFileIntroNone = "Sends a file with all the dive's data (profile, tanks, conditions, gear, notes). Your buddy opens it with SubAtlas to add it to their logbook."
     override val pickContact = "Pick from contacts"
     override val shareOther = "Other apps…"
@@ -1065,6 +1287,7 @@ object EnStrings : Strings {
     override val themeDark = "Dark"
     override val languageSection = "Language"
     override val kindColorsSection = "Dive colours"
+    override val kindNone = "Type not set"
     override val kindColorsHint = "Background colour of the cards in the dive list, by dive type."
     override val colorNone = "None"
     override val ascentSection = "Ascent rate"
@@ -1072,6 +1295,9 @@ object EnStrings : Strings {
     override fun ascentLevel(i: Int) = "Threshold $i"
     override fun ascentLimit(v: Int) = "above $v m/min"
     override val ascentReset = "Reset to defaults"
+    override val ascentAdd = "Add a threshold"
+    override val ascentRemove = "Remove"
+    override val ascentNone = "No threshold: the curve is never coloured by ascent rate."
     override val tabSafety = "Safety"
     override val safetyTitle = "Safety procedures"
     override val emergencyTitle = "Emergency: call"
@@ -1151,8 +1377,20 @@ object EnStrings : Strings {
     )
     override val languageSystem = "System"
     override val dataSection = "Data"
+    override val importFromApps = "Import from other apps"
     override val dataHint = "Save your dives, sites and checklists to a file, or restore them from a backup."
     override val exportData = "Export data"
+    override val exportSites = "Export sites"
+    override val importSites = "Import sites"
+    override val sitesHint = "Sites only, in a JSON file to import into another installation: located sites are added, and a known site without a position gets the one from the file."
+    override val sitesExported = "Sites exported."
+    override val sitesImportInvalid = "This file is not a SubAtlas sites export."
+    override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
+        "$added site${if (added != 1) "s" else ""} added",
+        "$updated position${if (updated != 1) "s" else ""} filled in",
+        "$unchanged already up to date",
+        "$ignored without position (ignored)",
+    ).joinToString("\n")
     override val importData = "Import data"
 
     override val dataExported = "Data exported."

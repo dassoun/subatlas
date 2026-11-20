@@ -4,7 +4,22 @@ package com.sensitivemobility.subatlas
 interface Storage {
     fun read(name: String): String?
     fun write(name: String, text: String)
+
+    /**
+     * Fichiers binaires (les photos des plongées), rangés dans des sous-dossiers : [name] peut être « photos/123.jpg ».
+     * Par défaut, une plateforme sans stockage de fichiers n'en garde aucun (elle ne propose alors pas d'ajouter de photos).
+     */
+    fun readBytes(name: String): ByteArray? = null
+
+    /** Écrit le fichier [name] ; `false` si l'écriture échoue. */
+    fun writeBytes(name: String, bytes: ByteArray): Boolean = false
+
+    /** Supprime le fichier [name] s'il existe. */
+    fun delete(name: String) {}
 }
+
+/** Une photo choisie, déjà réduite : l'image (JPEG) et sa vignette, avec les dimensions de l'image après rotation. */
+class PreparedPhoto(val full: ByteArray, val thumb: ByteArray, val width: Int, val height: Int, val source: String = "")
 
 sealed interface LocationResult {
     data class Success(val latitude: Double, val longitude: Double) : LocationResult
@@ -73,6 +88,32 @@ interface PlatformActions {
      */
     suspend fun httpGet(url: String, userAgent: String): String? = null
 
+    /**
+     * `true` si le téléphone a une connexion internet qui fonctionne. Sert à choisir la carte à l'ouverture (satellite avec
+     * réseau, plan sans). Par défaut `true` : une plateforme qui ne sait pas le dire laisse le choix à l'utilisateur.
+     */
+    fun isOnline(): Boolean = true
+
+    /** Comme [httpGet], mais renvoie le corps tel quel (octets) : sert aux tuiles du fond de carte. */
+    suspend fun httpGetBytes(url: String, userAgent: String): ByteArray? = null
+
     /** Fait choisir un fichier quelconque à l'utilisateur et renvoie ses octets ; `null` s'il annule. */
     suspend fun openFileBytes(): ByteArray?
+
+    /** `true` si la plateforme sait faire choisir des photos dans la galerie et les réduire (voir [pickPhotos]). */
+    val canPickPhotos: Boolean get() = false
+
+    /**
+     * Ouvre la galerie du système (sélection multiple) et renvoie les photos choisies, déjà réduites : une photo
+     * d'appareil (4000 pixels et plus, plusieurs Mo) est ramenée à 1600 pixels de côté au plus, en JPEG, avec une vignette,
+     * son orientation appliquée. Liste vide si l'utilisateur annule ou si rien n'a pu être lu.
+     */
+    suspend fun pickPhotos(): List<PreparedPhoto> = emptyList()
+
+    /**
+     * Supprime de la galerie du téléphone la photo d'origine [source] (l'adresse que [PreparedPhoto.source] a gardée). Le
+     * système demande à l'utilisateur de confirmer. Renvoie `true` si la photo est bien supprimée ; `false` si l'utilisateur
+     * refuse, si la photo n'est plus accessible ou si la plateforme ne sait pas le faire : rien n'est alors supprimé.
+     */
+    suspend fun deletePhotoOriginal(source: String): Boolean = false
 }

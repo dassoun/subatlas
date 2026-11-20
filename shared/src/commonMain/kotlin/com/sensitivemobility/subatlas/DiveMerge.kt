@@ -94,6 +94,8 @@ internal fun mergeDives(earlier: Dive, later: Dive): Dive {
         importKey = (a.importKeys() + b.importKeys()).distinct().joinToString("\n"),
         importModified = a.importModified + b.importModified,
         profile = mergeProfiles(a.profile, b.profile, gapSeconds) ?: a.profile ?: b.profile,
+        // Les photos des deux plongées, dans l'ordre : la couverture reste celle de la première.
+        photos = a.photos + b.photos,
     )
 }
 

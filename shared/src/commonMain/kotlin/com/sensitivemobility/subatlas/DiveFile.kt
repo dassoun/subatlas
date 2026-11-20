@@ -49,6 +49,8 @@ object DiveFileCodec {
             importKey = "",
             importModified = emptyMap(),
             noMerge = false,
+            // Les photos sont des fichiers de ce téléphone : le binôme n'aurait que des références vides.
+            photos = emptyList(),
         )
         val file = DiveFile(site = SharedSite(site.name, site.country, site.latitude, site.longitude, site.type), dive = clean)
         return json.encodeToString(DiveFile.serializer(), file)

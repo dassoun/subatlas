@@ -1,5 +1,8 @@
 package com.sensitivemobility.subatlas
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -36,8 +39,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,9 +66,24 @@ import kotlin.math.roundToInt
 
 private val PressureColor = Color(0xFF8E7CC3)
 private val NdlColor = Color(0xFF2BB673)
-private val DecoColor = Color(0xFFE5484D)
+internal val DecoColor = Color(0xFFE5484D)
 private val CnsColor = Color(0xFFF2A33A)
 private val Ppo2Color = Color(0xFFD16BA5)
+
+/**
+ * Couleurs de l'eau sous la surface, de haut en bas : le bleu clair du lagon, l'océan, puis l'abysse. Sur fond sombre,
+ * l'abysse se confondrait avec le fond : le dégradé y part d'un turquoise lumineux (la lumière de la surface) et s'arrête à
+ * l'océan, plein, pour que l'écart entre le haut et le bas reste net.
+ */
+@Composable
+internal fun waterGradient(): List<Color> {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark) {
+        listOf(Color(0xFF5CC8D6).copy(alpha = 0.70f), Lagoon.copy(alpha = 0.60f), Ocean)
+    } else {
+        listOf(Lagoon.copy(alpha = 0.18f), Ocean.copy(alpha = 0.55f), Abyss.copy(alpha = 0.85f))
+    }
+}
 
 /**
  * Courbe d'une plongée : profondeur en fonction du temps (la surface en haut), pression de la bouteille s'il y avait un
@@ -85,15 +105,25 @@ internal fun ProfileChart(
     val measurer = rememberTextMeasurer()
     val depthColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val waterColors = waterGradient()
+    // Rouge translucide sur l'eau : en thème sombre l'eau est plus claire, il faut plus de rouge pour qu'il ne vire pas au gris.
+    val decoSurfaceAlpha = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.62f else 0.38f
     val labelStyle = TextStyle(fontSize = if (fullscreen) 13.sp else 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember { mutableStateOf<Int?>(null) }
+    // À l'ouverture de la fiche, la courbe se dessine de gauche à droite (pas en plein écran, où l'on vient la lire).
+    val reveal = remember(profile) { Animatable(if (fullscreen) 1f else 0f) }
+    LaunchedEffect(profile) {
+        if (reveal.value < 1f) reveal.animateTo(1f, tween(900, delayMillis = 150, easing = FastOutSlowInEasing))
+    }
 
     val n = profile.depthDm.size
     val rates = remember(profile) { profile.ascentRates() }
     val maxRate = rates.maxOrNull() ?: 0.0
     val scale = LocalAscentScale.current
-    val secondsOver = rates.count { it > scale.yellowAbove } * profile.intervalSeconds
+    // Le bilan porte sur le seuil le plus bas ; sans aucun seuil réglé, il n'y a pas de limite à citer.
+    val lowestLimit = scale.levels.firstOrNull()?.above
+    val secondsOver = if (lowestLimit != null) rates.count { it > lowestLimit } * profile.intervalSeconds else 0
     val hasPressure = profile.pressureBar.size == n && profile.pressureBar.any { it > 0 }
     val prefs = LocalChartPrefs.current
     val showPressure = hasPressure && ChartSeries.PRESSURE in prefs.shown
@@ -214,7 +244,7 @@ internal fun ProfileChart(
             if (hasPpo2) seriesChip(ChartSeries.PPO2, Ppo2Color, "${s.seriesPpo2} (0–${formatNum(ppo2Max)} bar)")
         }
         Canvas(
-            (if (fullscreen) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().height(210.dp))
+            (if (fullscreen) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().height(260.dp))
                 .onSizeChanged { canvasSize = it }
                 .then(
                     if (fullscreen) {
@@ -301,7 +331,7 @@ internal fun ProfileChart(
                     pr += 50.0
                 }
             }
-            clipRect(p.left, 0f, p.left + p.width, size.height) {
+            clipRect(p.left, 0f, p.left + p.width * reveal.value, size.height) {
             // Courbes à échelle propre (LND, CNS, PPO2), tracées seulement pendant la plongée.
             fun inDive(i: Int) = profile.depthDm[i] >= 3 && profile.depthDm[i - 1] >= 3
             fun seriesLine(values: List<Int>, color: Color, y: (Int) -> Float) {
@@ -310,19 +340,9 @@ internal fun ProfileChart(
                     drawLine(color, Offset(x(i - 1), y(values[i - 1])), Offset(x(i), y(values[i])), 2f * density, StrokeCap.Round)
                 }
             }
-            if (showNdl) seriesLine(profile.ndlMin, NdlColor) { p.top + p.height * (1f - it.coerceIn(0, 99) / 99f) }
-            if (showCns) seriesLine(profile.cnsPct, CnsColor) { p.top + p.height * (1f - (it / cnsMax).toFloat().coerceIn(0f, 1f)) }
-            if (showPpo2) seriesLine(profile.ppo2Cb, Ppo2Color) { p.top + p.height * (1f - (it / 100.0 / ppo2Max).toFloat().coerceIn(0f, 1f)) }
-            if (showPressure && maxPressure > 0) {
-                val line = Path()
-                profile.pressureBar.forEachIndexed { i, bar ->
-                    val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
-                    if (i == 0) line.moveTo(x(i), y) else line.lineTo(x(i), y)
-                }
-                drawPath(line, PressureColor, style = Stroke(width = 2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
-
-            // Profondeur : aire sous la courbe, puis la courbe.
+            // Les aplats d'abord (l'eau, puis la surface du palier) : toutes les courbes sont dessinées par-dessus.
+            // Profondeur : la colonne d'eau entre la surface et la courbe, du bleu clair de la surface à l'abysse (le dégradé
+            // suit toute la hauteur du tracé, pas celle de la plongée).
             val line = Path()
             profile.depthDm.forEachIndexed { i, dm -> if (i == 0) line.moveTo(x(i), yDepth(dm)) else line.lineTo(x(i), yDepth(dm)) }
             val area = Path().apply {
@@ -331,10 +351,34 @@ internal fun ProfileChart(
                 lineTo(x(0), p.top)
                 close()
             }
-            drawPath(area, depthColor.copy(alpha = 0.18f))
-            drawPath(line, depthColor, style = Stroke(width = 2.5f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(area, Brush.verticalGradient(waterColors, startY = p.top, endY = p.top + p.height))
 
-            // Plafond de décompression : trait rouge à la profondeur du premier palier, sur l'échelle des profondeurs.
+            // Plafond de décompression : la surface interdite, de la surface au premier palier (rouge translucide)...
+            if (showDeco) {
+                val forbidden = Path().apply {
+                    moveTo(x(0), p.top)
+                    for (i in 0 until n) lineTo(x(i), yDepth(maxOf(profile.decoStopM[i], 0) * 10))
+                    lineTo(x(n - 1), p.top)
+                    close()
+                }
+                drawPath(forbidden, DecoColor.copy(alpha = decoSurfaceAlpha))
+            }
+
+            // Les courbes à échelle propre, par-dessus l'eau et la surface du palier.
+            if (showNdl) seriesLine(profile.ndlMin, NdlColor) { p.top + p.height * (1f - it.coerceIn(0, 99) / 99f) }
+            if (showCns) seriesLine(profile.cnsPct, CnsColor) { p.top + p.height * (1f - (it / cnsMax).toFloat().coerceIn(0f, 1f)) }
+            if (showPpo2) seriesLine(profile.ppo2Cb, Ppo2Color) { p.top + p.height * (1f - (it / 100.0 / ppo2Max).toFloat().coerceIn(0f, 1f)) }
+            if (showPressure && maxPressure > 0) {
+                val pressureLine = Path()
+                profile.pressureBar.forEachIndexed { i, bar ->
+                    val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
+                    if (i == 0) pressureLine.moveTo(x(i), y) else pressureLine.lineTo(x(i), y)
+                }
+                drawPath(pressureLine, PressureColor, style = Stroke(width = 2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+
+            // La courbe de profondeur, puis le bord du palier : un trait rouge à la profondeur du palier, sur l'échelle des profondeurs.
+            drawPath(line, depthColor, style = Stroke(width = 2.5f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
             if (showDeco) {
                 for (i in 1 until n) {
                     val a = profile.decoStopM[i - 1]
@@ -385,7 +429,7 @@ internal fun ProfileChart(
             val color = scale.colorFor(maxRate) ?: StatusOk
             Text(
                 s.labelled(s.ascentRateLabel, "max ${formatNum(round(maxRate * 10) / 10)} m/min") +
-                    " · " + if (secondsOver > 0) s.ascentOver(scale.yellowAbove, secondsOver) else s.ascentFine,
+                    (if (lowestLimit == null) "" else " · " + if (secondsOver > 0) s.ascentOver(lowestLimit, secondsOver) else s.ascentFine),
                 style = MaterialTheme.typography.bodyMedium,
                 color = color,
                 modifier = Modifier.padding(start = 4.dp),
@@ -416,7 +460,7 @@ internal fun ProfileFullscreen(profile: DiveProfile, actions: PlatformActions, o
                         Modifier.align(Alignment.TopEnd).size(44.dp).clickable(onClick = onClose),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("✕", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                        Pictogram(Picto.CLOSE, size = 22.dp, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -449,6 +493,8 @@ internal fun ProfileSparkline(profile: DiveProfile, modifier: Modifier = Modifie
     val scale = LocalAscentScale.current
     val rates = remember(profile) { profile.ascentRates() }
     val n = profile.depthDm.size
+    // La surface du palier, comme sur la courbe détaillée, tant que la série « palier » n'est pas masquée.
+    val showDeco = profile.decoStopM.size == n && profile.decoStopM.any { it > 0 } && ChartSeries.DECO in LocalChartPrefs.current.shown
     Canvas(modifier) {
         if (n < 2) return@Canvas
         val maxDepth = max(5.0, (profile.depthDm.maxOrNull() ?: 0) / 10.0).toFloat()
@@ -468,6 +514,15 @@ internal fun ProfileSparkline(profile: DiveProfile, modifier: Modifier = Modifie
             close()
         }
         drawPath(area, depthColor.copy(alpha = 0.18f))
+        if (showDeco) {
+            val forbidden = Path().apply {
+                moveTo(x(indices.first()), 0f)
+                for (i in indices) lineTo(x(i), (size.height - stroke) * (maxOf(profile.decoStopM[i], 0) / maxDepth) + stroke / 2)
+                lineTo(x(n - 1), 0f)
+                close()
+            }
+            drawPath(forbidden, DecoColor.copy(alpha = 0.40f))
+        }
         drawPath(line, depthColor, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
         for (k in 1 until indices.size) {
             val i = indices[k]

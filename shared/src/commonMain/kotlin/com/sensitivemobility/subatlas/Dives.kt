@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
@@ -129,7 +130,7 @@ private fun Tank.pressureText(): String? = when {
     else -> null
 }
 
-private fun Dive.timeRangeText(s: Strings): String? {
+internal fun Dive.timeRangeText(s: Strings): String? {
     val a = startTime
     val b = endTime
     val range = when {
@@ -143,6 +144,7 @@ private fun Dive.timeRangeText(s: Strings): String? {
 
 // ---------------------------------------------------------------- Liste
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun DiveList(
     state: AppState,
@@ -156,46 +158,11 @@ internal fun DiveList(
     val s = LocalStrings.current
     var pasting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
-    var planSkipped by remember { mutableStateOf(0) }
-    var siteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
-    var declined by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var reading by remember { mutableStateOf(false) }
     var mergeAsk by remember { mutableStateOf<Pair<Dive, Dive>?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
 
-    // Import d'un export Shearwater Cloud : on lit le fichier, on prépare la fusion, puis l'utilisateur confirme.
-    fun startShearwaterImport() {
-        scope.launch {
-            try {
-                val bytes = actions.openFileBytes() ?: return@launch
-                reading = true
-                // Un gros fichier se lit en quelques secondes : hors du fil principal pour ne pas figer l'écran.
-                val file = try {
-                    withContext(Dispatchers.Default) { ShearwaterImport.parse(bytes) }
-                } finally {
-                    reading = false
-                }
-                if (file.dives.isEmpty()) {
-                    message = s.shearwaterNone
-                } else {
-                    planSkipped = file.skipped
-                    val newPlan = state.planShearwaterImport(file.dives)
-                    siteMatches = state.similarSiteMatches(newPlan)
-                    declined = emptySet()
-                    plan = newPlan
-                }
-            } catch (e: ShearwaterImport.NotShearwaterException) {
-                message = s.shearwaterInvalid
-            } catch (e: Exception) {
-                message = s.importFailed(e.message ?: s.unknownError)
-            }
-        }
-    }
     val sort = state.settings.diveSort
     val descending = state.settings.diveSortDescending
     Column(Modifier.fillMaxSize().padding(pad)) {
-        if (state.dives.isEmpty()) Text(s.noDives, modifier = Modifier.padding(16.dp))
         if (state.dives.size > 1) {
             Row(
                 Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp),
@@ -222,43 +189,62 @@ internal fun DiveList(
         }
         // Numéro de la plongée : son rang dans l'ordre chronologique (1 = la plus ancienne).
         val numbers = state.dives.sortedWith(diveOrder).reversed().mapIndexed { i, d -> d.id to i + 1 }.toMap()
+        val sortedDives = state.sortedDives(sort, descending)
+        // Triées par date, les plongées sont regroupées par mois ; les autres tris n'ont pas de titres.
+        val groups = remember(sortedDives, sort, s) { diveGroups(sortedDives, byMonth = sort == DiveSort.DATE, s) }
         LazyColumn(
             Modifier.weight(1f),
             state = listState,
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = if (groups.firstOrNull()?.label != null) 0.dp else 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.sortedDives(sort, descending), key = { it.id }) { dive ->
-                Card(
-                    onClick = { onOpen(dive.id) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = diveCardColor(dive.kind, state.settings)),
-                ) {
-                    Row(Modifier.height(IntrinsicSize.Min).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(Modifier.weight(1.4f)) {
-                            val previous = if (dive.noMerge) null else state.mergeCandidate(dive)
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("#${numbers[dive.id]} · " + s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
-                                if (previous != null) {
-                                    Spacer(Modifier.width(10.dp))
-                                    MergeMenuChip(
-                                        onMerge = { mergeAsk = previous to dive },
-                                        onNoMerge = { state.setNoMerge(dive.id) },
-                                    )
+            if (state.dives.isEmpty()) item(key = "empty") { EmptyState(Picto.MASK, s.noDives, Modifier.fillParentMaxSize()) }
+            groups.forEachIndexed { index, group ->
+                // Titre du mois : il reste en haut de la liste tant que les plongées du mois défilent.
+                if (group.label != null) {
+                    stickyHeader(key = "month-$index-${group.key}") { MonthHeader(group.label, s.diveCount(group.dives.size)) }
+                }
+                items(group.dives, key = { it.id }) { dive ->
+                    Card(
+                        onClick = { onOpen(dive.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = diveCardColor(dive.kind, state.settings)),
+                    ) {
+                        Row(Modifier.height(IntrinsicSize.Min).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1.4f)) {
+                                val previous = if (dive.noMerge) null else state.mergeCandidate(dive)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("#${numbers[dive.id]} · " + s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
+                                    if (previous != null) {
+                                        Spacer(Modifier.width(10.dp))
+                                        MergeMenuChip(
+                                            onMerge = { mergeAsk = previous to dive },
+                                            onNoMerge = { state.setNoMerge(dive.id) },
+                                        )
+                                    }
+                                    // Globe à droite de la ligne (avant la courbe, jamais dessus) quand le site a une position GPS.
+                                    val gpsSite = state.site(dive.siteId)
+                                    if (gpsSite?.latitude != null && gpsSite.longitude != null) {
+                                        Spacer(Modifier.weight(1f))
+                                        Pictogram(Picto.GLOBE, size = 20.dp, tint = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
-                                // Globe à droite de la ligne (avant la courbe, jamais dessus) quand le site a une position GPS.
-                                val gpsSite = state.site(dive.siteId)
-                                if (gpsSite?.latitude != null && gpsSite.longitude != null) {
-                                    Spacer(Modifier.weight(1f))
-                                    Text("\uD83C\uDF10", style = MaterialTheme.typography.titleMedium)
+                                val diveSite = state.site(dive.siteId)
+                                if (diveSite != null) SiteLine(diveSite, MaterialTheme.typography.bodyMedium, maxLines = 1) else Text("?")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(dive.listCompact(s), style = MaterialTheme.typography.bodySmall)
+                                    // Pastille « photos » : le pictogramme et leur nombre.
+                                    if (dive.photos.isNotEmpty()) {
+                                        Spacer(Modifier.width(10.dp))
+                                        Pictogram(Picto.IMAGE, size = 15.dp, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(3.dp))
+                                        Text(dive.photos.size.toString(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
-                            val diveSite = state.site(dive.siteId)
-                            if (diveSite != null) SiteLine(diveSite, MaterialTheme.typography.bodyMedium, maxLines = 1) else Text("?")
-                            Text(dive.listCompact(s), style = MaterialTheme.typography.bodySmall)
+                            // La moitié droite de la carte, sur toute sa hauteur.
+                            dive.profile?.let { ProfileSparkline(it, Modifier.weight(1f).fillMaxHeight()) }
                         }
-                        // La moitié droite de la carte, sur toute sa hauteur.
-                        dive.profile?.let { ProfileSparkline(it, Modifier.weight(1f).fillMaxHeight()) }
                     }
                 }
             }
@@ -266,11 +252,60 @@ internal fun DiveList(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text(s.addDive) }
             TextButton(onClick = { pasting = true }, modifier = Modifier.fillMaxWidth()) { Text(s.pasteSharedButton) }
-            TextButton(onClick = { startShearwaterImport() }, modifier = Modifier.fillMaxWidth()) { Text(s.importShearwater) }
         }
     }
     if (pasting) PasteSharedDialog(onDismiss = { pasting = false }) { pasting = false; onShared(it) }
     mergeAsk?.let { (earlier, later) -> MergeDialog(state, earlier, later) { mergeAsk = null } }
+}
+
+/**
+ * Les imports de plongées depuis un fichier (export Shearwater Cloud, export Dive Logs Data de divelogs.de), dans les réglages :
+ * on choisit le fichier, un aperçu dit ce qui sera ajouté ou fusionné, puis l'utilisateur confirme.
+ */
+@Composable
+internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
+    val s = LocalStrings.current
+    val scope = rememberCoroutineScope()
+    var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var planSkipped by remember { mutableStateOf(0) }
+    var siteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
+    var declined by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var reading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    // Import d'un export Shearwater Cloud : on lit le fichier, on prépare la fusion, puis l'utilisateur confirme.
+    fun startShearwaterImport(divelogs: Boolean = false) {
+        scope.launch {
+            try {
+                val bytes = actions.openFileBytes() ?: return@launch
+                reading = true
+                // Un gros fichier se lit en quelques secondes : hors du fil principal pour ne pas figer l'écran.
+                val file = try {
+                    withContext(Dispatchers.Default) { if (divelogs) DivelogsImport.parse(bytes) else ShearwaterImport.parse(bytes) }
+                } finally {
+                    reading = false
+                }
+                if (file.dives.isEmpty()) {
+                    message = s.shearwaterNone
+                } else {
+                    planSkipped = file.skipped
+                    val newPlan = state.planShearwaterImport(file.dives)
+                    siteMatches = state.similarSiteMatches(newPlan)
+                    declined = emptySet()
+                    plan = newPlan
+                }
+            } catch (e: ShearwaterImport.NotShearwaterException) {
+                message = s.shearwaterInvalid
+            } catch (e: DivelogsImport.NotDivelogsException) {
+                message = s.divelogsInvalid
+            } catch (e: Exception) {
+                message = s.importFailed(e.message ?: s.unknownError)
+            }
+        }
+    }
+
+    OutlinedButton(onClick = { startShearwaterImport() }, modifier = Modifier.fillMaxWidth()) { Text(s.importShearwater) }
+    OutlinedButton(onClick = { startShearwaterImport(divelogs = true) }, modifier = Modifier.fillMaxWidth()) { Text(s.importDivelogs) }
     if (reading) ReadingDialog()
     plan?.let { items ->
         ShearwaterPlanDialog(
@@ -365,7 +400,7 @@ internal fun ShearwaterPlanDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.shearwaterTitle) },
+        title = { Text(if (items.any { it.dive.fromDivelogs }) s.divelogsTitle else s.shearwaterTitle) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (todo.isNotEmpty()) Text(s.shearwaterFound(todo.size, todo.size - merged, merged))
@@ -396,12 +431,12 @@ internal fun ShearwaterPlanDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(s.shearwaterPresent(present.size), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                        Text(if (showPresent) "▴" else "▾", style = MaterialTheme.typography.titleMedium)
+                        Pictogram(if (showPresent) Picto.CHEVRON_UP else Picto.CHEVRON_DOWN, size = 22.dp)
                     }
                     if (showPresent) present.forEach { PlanRow(it, "", MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 if (skipped > 0) Text(s.shearwaterSkipped(skipped), style = MaterialTheme.typography.bodySmall, color = StatusWarn)
-                if (merged > 0) Text(s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
+                if (merged > 0) Text(if (items.any { it.dive.fromDivelogs }) s.divelogsMergeHelp else s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = { Button(onClick = onConfirm, enabled = todo.isNotEmpty()) { Text(s.shearwaterConfirm) } },
@@ -442,7 +477,7 @@ private fun Dive.suitSummary(s: Strings): String? {
 
 /** Ligne de résumé de la liste : horaires, profondeur max, eau, combinaison, volumes, lestage. */
 /** Résumé de la liste : durée et profondeur seulement. */
-private fun Dive.listCompact(s: Strings): String = listOfNotNull(
+internal fun Dive.listCompact(s: Strings): String = listOfNotNull(
     durationMinutes?.let { s.minutesShort(it) },
     maxDepth?.let { "max ${formatNum(it)} m" },
 ).joinToString(" · ")
@@ -489,6 +524,42 @@ internal fun SiteDivesSection(dives: List<Dive>, onOpen: (Long) -> Unit) {
     }
 }
 
+/** Des plongées consécutives d'un même mois (ou toutes, sans titre, quand le tri n'est pas par date). */
+private class DiveGroup(val key: String, val label: String?, val dives: List<Dive>)
+
+private fun diveGroups(sorted: List<Dive>, byMonth: Boolean, s: Strings): List<DiveGroup> {
+    if (!byMonth) return listOf(DiveGroup("all", null, sorted))
+    val groups = ArrayList<DiveGroup>()
+    var currentKey: String? = null
+    var currentLabel: String? = null
+    var members = ArrayList<Dive>()
+    for (dive in sorted) {
+        val date = parseDate(dive.date)
+        val key = date?.let { "${it.year}-${it.month.ordinal}" } ?: "?"
+        if (key != currentKey) {
+            if (currentKey != null) groups += DiveGroup(currentKey, currentLabel, members)
+            currentKey = key
+            currentLabel = date?.let(s::monthYear)
+            members = ArrayList()
+        }
+        members += dive
+    }
+    if (currentKey != null) groups += DiveGroup(currentKey, currentLabel, members)
+    return groups
+}
+
+/** Titre d'un mois dans la liste : le mois à gauche, le nombre de plongées à droite, sur le fond de l'écran (il reste en haut). */
+@Composable
+private fun MonthHeader(label: String, count: String) {
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(count, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 // --------------------------------------------------------------- Détail
 
 @Composable
@@ -507,6 +578,22 @@ internal fun DiveDetailView(
     var sharing by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
     var merging by remember { mutableStateOf(false) }
+    var sharingImage by remember { mutableStateOf(false) }
+    // Photos : rang de la photo ouverte dans la visionneuse, et attente pendant la lecture de celles qu'on vient de choisir.
+    var photoViewer by remember { mutableStateOf<Int?>(null) }
+    var addingPhotos by remember { mutableStateOf(false) }
+    val photoScope = rememberCoroutineScope()
+    fun addPhotos() {
+        photoScope.launch {
+            addingPhotos = true
+            try {
+                val picked = actions.pickPhotos()
+                if (picked.isNotEmpty()) state.addPhotos(dive.id, picked)
+            } finally {
+                addingPhotos = false
+            }
+        }
+    }
     val site = state.site(dive.siteId)
     val previousDive = state.mergeCandidate(dive)
     val recipients = dive.shareRecipients
@@ -515,10 +602,20 @@ internal fun DiveDetailView(
         Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // La couverture (première photo) en tête de la fiche.
+        dive.photos.firstOrNull()?.let { cover ->
+            PhotoCover(state, cover, s.photosTitle, onClick = { photoViewer = 0 })
+        }
         if (site != null) {
             TextButton(onClick = { onOpenSite(site.id) }) {
                 SiteLine(site, MaterialTheme.typography.titleMedium)
             }
+        }
+        // Le site sur la carte, en bandeau (un appui ouvre sa fiche).
+        val lat = site?.latitude
+        val lon = site?.longitude
+        if (site != null && lat != null && lon != null) {
+            SiteBanner(lat, lon, site.name, actions, type = site.type) { onOpenSite(site.id) }
         }
         // Type de plongée juste sous le site.
         dive.kind?.let { k ->
@@ -538,20 +635,30 @@ internal fun DiveDetailView(
         }
         dive.timeRangeText(s)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-        // Chiffres clés en tuiles : la valeur en grand, le libellé en petit dessous.
+        // Chiffres clés en tuiles : un pictogramme et le libellé en petit, la valeur en grand dessous.
         val tiles = listOfNotNull(
-            dive.maxDepth?.let { s.depthLabel to "${formatNum(it)} m" },
-            dive.avgDepthMeters?.let { s.avgDepthLabel to "${formatNum(it)} m" },
-            dive.durationMinutes?.let { s.durationLabel to s.minutesShort(it) },
-            dive.sacLitersPerMin?.let { s.sacLabel to "${formatNum(round(it * 10) / 10)} L/min" },
+            dive.maxDepth?.let { Triple(Picto.ARROW_DOWN, s.depthLabel, "${formatNum(it)} m") },
+            dive.avgDepthMeters?.let { Triple(Picto.DEPTH_SPAN, s.avgDepthLabel, "${formatNum(it)} m") },
+            dive.durationMinutes?.let { Triple(Picto.STOPWATCH, s.durationLabel, s.minutesShort(it)) },
+            dive.sacLitersPerMin?.let { Triple(Picto.GAUGE, s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min") },
+            dive.waterTempC?.let { Triple(Picto.THERMOMETER, s.waterTemp, "${formatNum(it)} °C") },
+            dive.visibilityMeters?.let { Triple(Picto.EYE, s.visibility, "$it m") },
         )
         tiles.chunked(2).forEach { rowTiles ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowTiles.forEach { (label, value) -> StatTile(label, value, Modifier.weight(1f)) }
+                rowTiles.forEach { (icon, label, value) -> DiveStatTile(icon, label, value, Modifier.weight(1f)) }
                 if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
             }
         }
         dive.profile?.let { ProfileChart(it, Modifier.fillMaxWidth(), onFullscreen = { fullscreen = true }, onOpenProcedure = onOpenProcedure) }
+        if (dive.photos.isNotEmpty()) {
+            PhotoStrip(
+                state, dive.photos, s.photosTitle,
+                onOpen = { photoViewer = it },
+                onAdd = if (actions.canPickPhotos) ::addPhotos else null,
+                adding = addingPhotos,
+            )
+        }
 
         dive.tanks.forEachIndexed { i, tank ->
             FactCard("${s.tankTitle(i + 1)} · ${tank.gasLabel(s)}") {
@@ -573,12 +680,11 @@ internal fun DiveDetailView(
                 .joinToString(" - ").takeIf { it.isNotEmpty() },
             dive.suit.takeIf { it.isNotBlank() },
         ).joinToString(" · ")
-        val hasFacts = dive.waterTempC != null || dive.visibilityMeters != null || suitText.isNotEmpty() || dive.weightKg != null ||
+        // La température et la visibilité sont déjà en tuiles, avec les chiffres clés.
+        val hasFacts = suitText.isNotEmpty() || dive.weightKg != null ||
             dive.buddy.isNotBlank() || dive.group.isNotEmpty() || dive.computer.isNotBlank()
         if (hasFacts) {
             FactCard(s.conditionsSection) {
-                dive.waterTempC?.let { Fact(s.waterTemp, "${formatNum(it)} °C") }
-                dive.visibilityMeters?.let { Fact(s.visibility, "$it m") }
                 if (suitText.isNotEmpty()) Fact(s.suit, suitText)
                 dive.weightKg?.let { Fact(s.weight, "${formatNum(it)} kg") }
                 if (dive.buddy.isNotBlank()) Fact(s.buddy, dive.buddy)
@@ -590,16 +696,28 @@ internal fun DiveDetailView(
             FactCard(s.notesLabel) { Text(dive.notes, style = MaterialTheme.typography.bodyLarge) }
         }
 
-        val lat = site?.latitude
-        val lon = site?.longitude
         if (site != null && lat != null && lon != null) {
             OutlinedButton(onClick = { actions.openMap(lat, lon, site.name) }, modifier = Modifier.fillMaxWidth()) {
                 Text(s.openInMaps)
             }
         }
+        // Sans photo, un bouton ; avec des photos, c'est la tuile « + » de leur rangée.
+        if (dive.photos.isEmpty() && actions.canPickPhotos) {
+            OutlinedButton(onClick = ::addPhotos, enabled = !addingPhotos, modifier = Modifier.fillMaxWidth()) {
+                if (addingPhotos) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Pictogram(Picto.IMAGE, size = 20.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(s.photosAdd)
+            }
+        }
         if (canShare) {
             OutlinedButton(onClick = { sharing = true }, modifier = Modifier.fillMaxWidth()) {
                 Text(when (recipients.size) { 0 -> s.shareTitle; 1 -> s.shareButton(recipients[0].name); else -> s.shareWithPeople })
+            }
+            // Une carte visuelle (site, courbe, chiffres clés) à envoyer ou à poster.
+            OutlinedButton(onClick = { sharingImage = true }, modifier = Modifier.fillMaxWidth()) {
+                Pictogram(Picto.IMAGE, size = 20.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(s.shareImageButton)
             }
         }
         // Dans la fiche, la fusion reste proposée même si on a refusé qu'elle le soit dans la liste.
@@ -614,7 +732,20 @@ internal fun DiveDetailView(
         TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text(s.delete) }
     }
     if (sharing && site != null) ShareDiveDialog(dive, site, actions, recipients) { sharing = false }
+    if (sharingImage && site != null) ShareImageDialog(dive, site, state.diveNumber(dive.id), actions) { sharingImage = false }
     if (merging && previousDive != null) MergeDialog(state, previousDive, dive) { merging = false }
+    photoViewer?.let { start ->
+        PhotoViewer(
+            state, dive.photos, start, actions,
+            onClose = { photoViewer = null },
+            onMakeCover = { state.makeCover(dive.id, it.id) },
+            onUnlink = { state.removePhoto(dive.id, it.id) },
+            onDeleteFromPhone = { photo ->
+                // Le système demande confirmation ; la photo n'est retirée de la plongée que si l'originale est bien supprimée.
+                actions.deletePhotoOriginal(photo.source).also { deleted -> if (deleted) state.removePhoto(dive.id, photo.id) }
+            },
+        )
+    }
     dive.profile?.let { if (fullscreen) ProfileFullscreen(it, actions) { fullscreen = false } }
     if (confirm) {
         ConfirmDialog(
@@ -625,13 +756,22 @@ internal fun DiveDetailView(
     }
 }
 
-/** Une tuile de chiffre clé : la valeur en grand, le libellé en petit dessous. */
+/** Une tuile de chiffre clé : pictogramme et libellé en petit, la valeur en grand dessous. */
 @Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+private fun DiveStatTile(icon: Picto, label: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Pictogram(icon, size = 20.dp, tint = MaterialTheme.colorScheme.primary)
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                value,
+                Modifier.padding(top = 2.dp),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
@@ -860,6 +1000,7 @@ internal fun DiveForm(
                 importModified = existing?.importModified.orEmpty(),
                 noMerge = existing?.noMerge ?: false,
                 profile = existing?.profile,
+                photos = existing?.photos.orEmpty(),
             )
         state.saveDive(dive)
         return dive
@@ -938,7 +1079,7 @@ internal fun DiveForm(
                                 val la = site.latitude
                                 val lo = site.longitude
                                 // Globe quand le site a une position GPS.
-                                Text(site.fullName() + if (la != null && lo != null) " 🌐" else "")
+                                if (la != null && lo != null) PictoText(site.fullName(), Picto.GLOBE, iconAtEnd = true) else Text(site.fullName())
                                 val sub = if (here != null && la != null && lo != null) {
                                     s.distanceAway(formatDistance(distanceMeters(here.latitude, here.longitude, la, lo)))
                                 } else if (la == null || lo == null) {
@@ -1449,7 +1590,7 @@ private fun BuddyField(
                         onPick(c.name, c.phone, c.email, true)
                     }
                 }
-            }) { Text("\uD83D\uDC64 " + s.pickContact) }
+            }) { PictoText(s.pickContact, Picto.PERSON) }
         }
         if (denied && q.isNotEmpty()) Text(s.contactsDenied, style = MaterialTheme.typography.bodySmall)
         if (suggestions.isNotEmpty()) {
@@ -1467,7 +1608,7 @@ private fun BuddyField(
                         ) {
                             // Icône seulement pour les contacts du répertoire (pas pour les binômes déjà saisis).
                             Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-                                if (sug.fromContacts && results.any { it.name == sug.name }) Text("\uD83D\uDC64")
+                                if (sug.fromContacts && results.any { it.name == sug.name }) Pictogram(Picto.PERSON, size = 18.dp)
                             }
                             Column {
                                 Text(sug.name)

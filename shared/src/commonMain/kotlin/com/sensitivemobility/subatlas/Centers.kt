@@ -104,15 +104,13 @@ internal fun GpsFields(
 internal fun CenterList(state: AppState, pad: PaddingValues, onOpen: (Long) -> Unit, onAdd: () -> Unit, listState: LazyListState) {
     val s = LocalStrings.current
     Column(Modifier.fillMaxSize().padding(pad)) {
-        if (state.centers.isEmpty()) {
-            Text(s.noCenters, modifier = Modifier.padding(16.dp))
-        }
         LazyColumn(
             Modifier.weight(1f),
             state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (state.centers.isEmpty()) item(key = "empty") { EmptyState(Picto.ANCHOR, s.noCenters, Modifier.fillParentMaxSize()) }
             items(state.centers, key = { it.id }) { center ->
                 Card(
                     onClick = { onOpen(center.id) },

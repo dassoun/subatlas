@@ -53,7 +53,8 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         private set
 
     init {
-        settings = load(SETTINGS_FILE, Settings.serializer()) ?: Settings()
+        // Les seuils de remontée enregistrés avant la liste modifiable (trois niveaux fixes) sont repris dans la liste.
+        settings = (load(SETTINGS_FILE, Settings.serializer()) ?: Settings()).let { it.copy(ascent = it.ascent.migrated()) }
         sites += load(SITES_FILE, siteSerializer) ?: emptyList()
         centers += load(CENTERS_FILE, centerSerializer) ?: emptyList()
         dives += load(DIVES_FILE, diveSerializer) ?: emptyList()
@@ -240,7 +241,8 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     private fun closestByTime(sw: ShearwaterDive, taken: Set<Long>): Dive? {
         val swStart = minutesOfDay(sw.startTime)
-        val sameDay = dives.filter { it.date == sw.date && it.id !in taken && it.importKey.isEmpty() }
+        // Un export Divelogs se fusionne aussi avec une plongée déjà importée d'ailleurs (Shearwater) : c'est la même plongée.
+        val sameDay = dives.filter { it.date == sw.date && it.id !in taken && (sw.fromDivelogs || it.importKey.isEmpty()) }
         if (swStart != null) {
             val timed = sameDay
                 .mapNotNull { d -> minutesOfDay(d.startTime)?.let { d to kotlin.math.abs(it - swStart) } }
@@ -261,8 +263,10 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
             if (item.alreadyDone) continue
             val existing = item.mergeInto?.let { dive(it.id) ?: it }
             if (existing != null) {
-                val result = mergeShearwater(existing, item.dive)
+                val result = if (item.dive.fromDivelogs) mergeDivelogs(existing, item.dive) else mergeShearwater(existing, item.dive)
                 saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
+                // Divelogs donne la position du site de chaque plongée : un site du carnet encore sans position la reçoit.
+                if (item.dive.fromDivelogs) completeSitePosition(result.siteId, item.dive)
                 merged++
             } else {
                 saveDive(newDiveFrom(item.dive, declined), persist = false)
@@ -382,6 +386,27 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         )
     }
 
+    /** Donne au site la position de la plongée importée s'il n'en a pas (et son pays s'il n'en a pas). */
+    private fun completeSitePosition(siteId: Long, sw: ShearwaterDive) {
+        val site = site(siteId) ?: return
+        val la = sw.latitude
+        val lo = sw.longitude
+        if ((site.latitude == null || site.longitude == null) && la != null && lo != null) {
+            saveSite(site.copy(latitude = la, longitude = lo, country = site.country.ifBlank { sw.country }), persist = false)
+        }
+    }
+
+    /**
+     * Complète la plongée du carnet avec celle d'un export Divelogs : comme pour Shearwater, rien de ce qui est déjà renseigné n'est
+     * écrasé. En plus : la courbe et l'ordinateur d'une plongée déjà importée de Shearwater sont gardés (leur courbe est plus riche :
+     * LND, paliers, CNS), et la source Divelogs s'ajoute à celles de la plongée, pour qu'un second import ne la refasse pas.
+     */
+    private fun mergeDivelogs(d: Dive, dl: ShearwaterDive): Dive = mergeShearwater(d, dl).copy(
+        computer = d.computer.ifBlank { dl.computer },
+        profile = d.profile ?: dl.profile,
+        importKey = (d.importKeys() + dl.key).distinct().joinToString("\n"),
+    )
+
     // --- Plongées partagées ---
     /**
      * Crée la plongée reçue dans le carnet. Le site est retrouvé par son nom (et son pays) ou par sa proximité (300 m) ;
@@ -403,7 +428,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     /** Ajoute au carnet une plongée reçue en fichier, avec toutes ses données (courbe, bouteilles, conditions…). */
     fun addDiveFile(file: DiveFile): Long {
-        val dive = file.dive.copy(id = newId(), siteId = siteFor(file.site).id, importKey = "", noMerge = false)
+        val dive = file.dive.copy(id = newId(), siteId = siteFor(file.site).id, importKey = "", noMerge = false, photos = emptyList())
         saveDive(dive)
         return dive.id
     }
@@ -463,16 +488,93 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         saveDives()
     }
 
-    /** Efface toutes les plongées du carnet (les sites, centres et listes de contrôle sont conservés). */
+    /**
+     * Intègre les sites d'un fichier d'une autre installation. Seuls comptent ceux qui ont une position : un site connu (même nom,
+     * ou nom très proche dans le même pays) mais sans position reçoit celle du fichier, un site inconnu est ajouté, un site
+     * déjà localisé n'est pas modifié. Les sites du fichier sans position sont ignorés.
+     */
+    fun importSites(incoming: List<SharedSite>): SitesImportResult {
+        var added = 0
+        var updated = 0
+        var unchanged = 0
+        var ignored = 0
+        for (s in incoming) {
+            val la = s.lat
+            val lo = s.lon
+            if (la == null || lo == null || s.name.isBlank()) { ignored++; continue }
+            val found = exactSite(s.name, s.country) ?: similarSiteFor(s.name, s.country, la, lo)
+            when {
+                found == null -> {
+                    saveSite(DiveSite(id = newId(), name = s.name, latitude = la, longitude = lo, country = s.country, type = s.type), persist = false)
+                    added++
+                }
+                found.latitude == null || found.longitude == null -> {
+                    saveSite(
+                        found.copy(latitude = la, longitude = lo, country = found.country.ifBlank { s.country }, type = found.type ?: s.type),
+                        persist = false,
+                    )
+                    updated++
+                }
+                else -> unchanged++
+            }
+        }
+        if (added + updated > 0) saveSites()
+        return SitesImportResult(added, updated, unchanged, ignored)
+    }
+
+    /** Efface toutes les plongées du carnet (les sites, centres et listes de contrôle sont conservés), avec leurs photos. */
     fun deleteAllDives() {
+        dives.forEach { d -> d.photos.forEach(::deletePhotoFiles) }
         dives.clear()
         saveDives()
     }
 
     fun deleteDive(id: Long) {
+        dive(id)?.photos?.forEach(::deletePhotoFiles)
         dives.removeAll { it.id == id }
         saveDives()
     }
+
+    // --- Photos des plongées ---
+
+    private fun deletePhotoFiles(photo: DivePhoto) {
+        storage.delete(photo.fileName)
+        storage.delete(photo.thumbName)
+    }
+
+    /** Ajoute des photos (déjà réduites) à la fin de celles de la plongée [diveId] ; celles qu'on n'a pas pu écrire sont ignorées. */
+    fun addPhotos(diveId: Long, prepared: List<PreparedPhoto>): Int {
+        val dive = dive(diveId) ?: return 0
+        val added = prepared.mapNotNull { p ->
+            val photo = DivePhoto(newId().toString(), p.width, p.height, p.source)
+            if (storage.writeBytes(photo.fileName, p.full) && storage.writeBytes(photo.thumbName, p.thumb)) {
+                photo
+            } else {
+                deletePhotoFiles(photo)
+                null
+            }
+        }
+        if (added.isNotEmpty()) saveDive(dive.copy(photos = dive.photos + added))
+        return added.size
+    }
+
+    /** Retire la photo [photoId] de la plongée [diveId] et supprime la copie réduite de l'appli (la photo d'origine, elle, reste dans la galerie). */
+    fun removePhoto(diveId: Long, photoId: String) {
+        val dive = dive(diveId) ?: return
+        val photo = dive.photos.firstOrNull { it.id == photoId } ?: return
+        deletePhotoFiles(photo)
+        saveDive(dive.copy(photos = dive.photos - photo))
+    }
+
+    /** Met la photo [photoId] en première position : c'est la couverture de la plongée. */
+    fun makeCover(diveId: Long, photoId: String) {
+        val dive = dive(diveId) ?: return
+        val photo = dive.photos.firstOrNull { it.id == photoId } ?: return
+        saveDive(dive.copy(photos = listOf(photo) + (dive.photos - photo)))
+    }
+
+    /** Octets de la photo (ou de sa vignette) ; `null` si le fichier manque. Lecture de fichier : pas sur le fil principal. */
+    fun photoBytes(photo: DivePhoto, thumb: Boolean): ByteArray? = storage.readBytes(if (thumb) photo.thumbName else photo.fileName)
 
     // --- Centres de plongée ---
     fun center(id: Long) = centers.firstOrNull { it.id == id }
