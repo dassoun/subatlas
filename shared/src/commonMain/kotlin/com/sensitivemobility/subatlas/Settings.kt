@@ -33,7 +33,38 @@ data class Settings(
     val chartSeries: Set<ChartSeries> = setOf(ChartSeries.PRESSURE),
     /** Couples de sites que l'utilisateur a déclarés distincts (« id:id »), à ne plus proposer comme doublons. */
     val distinctSites: Set<String> = emptySet(),
+    /** Colore la courbe de l'image de plongée à partager selon la vitesse de remontée (désactivé par défaut). */
+    val shareAscentColors: Boolean = false,
+    /** Unités affichées et saisies (métrique par défaut) ; les données restent en métrique. */
+    val units: UnitSystem = UnitSystem.METRIC,
+    /** Ordinateurs de plongée associés à l'appli (voir docs/import-ordinateur-plongee.md). */
+    val computers: List<DiveComputer> = emptyList(),
 )
+
+/** Un ordinateur de plongée associé : de quoi le retrouver et le reconnaître sans nouvelle recherche. */
+@Serializable
+data class DiveComputer(
+    /** Adresse Bluetooth. */
+    val address: String,
+    /** Nom Bluetooth vu à la recherche (par exemple « Peregrine »). */
+    val name: String,
+    /** Modèle lu dans l'appareil (par exemple « Peregrine TX »). */
+    val model: String,
+    val serial: String,
+    val firmware: String = "",
+    /** Famille de protocole : [SHEARWATER]. */
+    val family: String = SHEARWATER,
+    /** Importer les nouvelles plongées sans demander de confirmation quand l'ordinateur est détecté. */
+    val autoImport: Boolean = false,
+) {
+    /** « Peregrine TX (977D8B42) · V104 Classic ». */
+    fun label(): String = listOf("$model${serial.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()}", firmware.takeIf { it.isNotBlank() })
+        .filterNotNull().joinToString(" · ")
+
+    companion object {
+        const val SHEARWATER = "shearwater"
+    }
+}
 
 /** Courbes que le graphique d'une plongée peut superposer à la profondeur (quand l'ordinateur les a enregistrées). */
 @Serializable

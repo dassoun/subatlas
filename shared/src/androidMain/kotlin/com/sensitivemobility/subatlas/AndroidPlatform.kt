@@ -51,6 +51,7 @@ class AndroidStorage(context: Context) : Storage {
  * @param pickOpenUri ouvre le sélecteur de fichier du système (fourni par l'Activity) ; `null` si annulé.
  * @param pickPhotoUris ouvre la galerie du système en sélection multiple (fournie par l'Activity) ; liste vide si annulé.
  * @param requestDelete lance la demande de suppression du système (confirmation de l'utilisateur) ; `true` s'il accepte.
+ * @param requestBlePermissions demande les permissions Bluetooth (voir [blePermissions]) ; `true` si elles sont accordées.
  */
 class AndroidPlatformActions(
     private val context: Context,
@@ -58,7 +59,26 @@ class AndroidPlatformActions(
     private val pickOpenUri: suspend () -> Uri?,
     private val pickPhotoUris: suspend () -> List<Uri>,
     private val requestDelete: suspend (IntentSender) -> Boolean,
+    requestBlePermissions: suspend () -> Boolean,
 ) : PlatformActions {
+    override val ble: BleTransport = AndroidBle(context, requestBlePermissions)
+
+    private val foreground = kotlinx.coroutines.flow.MutableStateFlow(true)
+    override val appInForeground: kotlinx.coroutines.flow.StateFlow<Boolean> get() = foreground
+
+    init {
+        // L'appli est « au premier plan » entre ON_RESUME et ON_PAUSE de son activité.
+        (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.addObserver(
+            androidx.lifecycle.LifecycleEventObserver { _, event ->
+                when (event) {
+                    androidx.lifecycle.Lifecycle.Event.ON_RESUME -> foreground.value = true
+                    androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> foreground.value = false
+                    else -> {}
+                }
+            },
+        )
+    }
+
     override val canPickPhotos: Boolean get() = true
 
     override suspend fun pickPhotos(): List<PreparedPhoto> {
@@ -184,6 +204,14 @@ class AndroidPlatformActions(
         return withContext(Dispatchers.IO) {
             val input = context.contentResolver.openInputStream(uri) ?: error("impossible de lire le fichier")
             input.use { it.readBytes() }
+        }
+    }
+
+    override fun setKeepScreenOn(on: Boolean) {
+        val activity = context as? android.app.Activity ?: return
+        activity.runOnUiThread {
+            if (on) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 

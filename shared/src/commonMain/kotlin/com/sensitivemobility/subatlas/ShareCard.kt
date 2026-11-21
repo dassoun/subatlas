@@ -64,12 +64,13 @@ private val CardSurfaceLight = Color(0xFF5CC8D6)
 @Composable
 internal fun DiveShareCard(dive: Dive, site: DiveSite, number: Int, modifier: Modifier = Modifier) {
     val s = LocalStrings.current
+    val u = LocalUnits.current
     val figures = listOfNotNull(
-        dive.maxDepth?.let { Triple(Picto.ARROW_DOWN, s.depthLabel, "${formatNum(it)} m") },
+        dive.maxDepth?.let { Triple(Picto.ARROW_DOWN, s.depthLabel, u.depth.text(it)) },
         dive.durationMinutes?.let { Triple(Picto.STOPWATCH, s.durationLabel, s.minutesShort(it)) },
-        dive.waterTempC?.let { Triple(Picto.THERMOMETER, s.waterTemp, "${formatNum(it)} °C") },
-        dive.avgDepthMeters?.let { Triple(Picto.DEPTH_SPAN, s.avgDepthLabel, "${formatNum(it)} m") },
-        dive.visibilityMeters?.let { Triple(Picto.EYE, s.visibility, "$it m") },
+        dive.waterTempC?.let { Triple(Picto.THERMOMETER, s.waterTemp, u.temperature.text(it)) },
+        dive.avgDepthMeters?.let { Triple(Picto.DEPTH_SPAN, s.avgDepthLabel, u.depth.text(it)) },
+        dive.visibilityMeters?.let { Triple(Picto.EYE, s.visibility, u.depth.text(it.toDouble())) },
     ).take(3)
 
     Box(modifier.aspectRatio(4f / 5f).background(Brush.verticalGradient(listOf(Ocean, Abyss)))) {
@@ -113,7 +114,7 @@ internal fun DiveShareCard(dive: Dive, site: DiveSite, number: Int, modifier: Mo
                 } else {
                     // Sans courbe : la profondeur max en grand.
                     dive.maxDepth?.let {
-                        Text("${formatNum(it)} m", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 56.sp)
+                        Text(u.depth.text(it), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 56.sp)
                     }
                 }
             }
@@ -141,6 +142,7 @@ internal fun DiveShareCard(dive: Dive, site: DiveSite, number: Int, modifier: Mo
 private fun CardProfile(profile: DiveProfile, modifier: Modifier = Modifier) {
     val measurer = rememberTextMeasurer()
     val scale = LocalAscentScale.current
+    val colored = LocalShareAscentColors.current
     val rates = remember(profile) { profile.ascentRates() }
     val n = profile.depthDm.size
     val hasDeco = profile.decoStopM.size == n && profile.decoStopM.any { it > 0 }
@@ -194,6 +196,7 @@ private fun CardProfile(profile: DiveProfile, modifier: Modifier = Modifier) {
         }
         drawPath(line, Color.White, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         for (i in 1 until n) {
+            if (!colored) break
             val color = scale.colorFor(rates[i]) ?: continue
             drawLine(color, Offset(x(i - 1), y(profile.depthDm[i - 1] / 10.0)), Offset(x(i), y(profile.depthDm[i] / 10.0)), 3.dp.toPx(), StrokeCap.Round)
         }

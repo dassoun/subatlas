@@ -40,7 +40,17 @@ internal class ShearwaterDive(
     val profile: DiveProfile?,
     /** Plongée lue dans un export Dive Logs Data (divelogs.de) : même aperçu et même fusion, avec ses propres règles (voir `mergeDivelogs`). */
     val fromDivelogs: Boolean = false,
-)
+    /** Plongée lue dans un fichier UDDF : mêmes règles de fusion que Divelogs (rien d'écrasé, courbe déjà importée gardée). */
+    val fromUddf: Boolean = false,
+    /** Plongée téléchargée en Bluetooth depuis l'ordinateur (voir `ShearwaterBleImport`) : mêmes règles de fusion que Divelogs. */
+    val fromDevice: Boolean = false,
+) {
+    /**
+     * Une source qui complète le carnet (Divelogs, UDDF, ordinateur en Bluetooth) plutôt qu'un export Shearwater Cloud : sa fusion ne
+     * touche pas à ce qui y est, et peut rejoindre une plongée déjà importée d'ailleurs.
+     */
+    val fromLogbook: Boolean get() = fromDivelogs || fromUddf || fromDevice
+}
 
 /**
  * Lecture d'un export « Shearwater Cloud » (fichier `.db` SQLite). Les métadonnées sont dans `dive_details`, le profil
@@ -278,35 +288,8 @@ internal object ShearwaterImport {
      * Les journaux UDDF d'une plongée saisie à la main ne contiennent que quatre points (un trapèze) : on n'en fait pas de
      * courbe, qui serait fausse. Un vrai profil (plus de douze points) est rééchantillonné à intervalle régulier.
      */
-    private fun uddfProfile(u: Uddf): DiveProfile? {
-        val pts = u.points.sortedBy { it.first }
-        if (pts.size < 12) return null
-        val total = pts.last().first
-        if (total <= 0) return null
-        val deltas = pts.zipWithNext { a, b -> b.first - a.first }.filter { it > 0 }.sorted()
-        val median = deltas.getOrNull(deltas.size / 2) ?: return null
-        var interval = listOf(1, 2, 3, 4, 5, 10, 15, 20, 30, 60).minByOrNull { abs(it - median) } ?: 10
-        while (total / interval > 1500) interval *= 2 // une plongée très longue : on garde la courbe légère
-        val hasTemp = pts.count { it.third != null } >= pts.size / 2
-
-        fun at(t: Double, value: (Triple<Double, Double, Double?>) -> Double?): Double? {
-            var i = pts.indexOfLast { it.first <= t }
-            if (i < 0) i = 0
-            val a = pts[i]
-            val b = pts.getOrNull(i + 1) ?: return value(a)
-            val va = value(a) ?: return value(b)
-            val vb = value(b) ?: return va
-            return if (b.first == a.first) va else va + (vb - va) * ((t - a.first) / (b.first - a.first))
-        }
-
-        val count = (total / interval).toInt() + 1
-        val times = List(count) { it * interval.toDouble() }
-        return DiveProfile(
-            intervalSeconds = interval,
-            depthDm = times.map { round((at(it) { p -> p.second } ?: 0.0) * 10).toInt() },
-            tempDc = if (hasTemp) times.map { round((at(it) { p -> p.third } ?: 0.0) * 10).toInt() } else emptyList(),
-        )
-    }
+    private fun uddfProfile(u: Uddf): DiveProfile? =
+        UddfImport.profileFrom(u.points.map { UddfImport.Point(it.first, it.second, it.third, null) })
 
     // ------------------------------------------------------------------ Profil (format PNF)
 
@@ -315,8 +298,11 @@ internal object ShearwaterImport {
      * enregistrements de 32 octets ; ceux de type 0x01 sont les échantillons : profondeur (octets 1-2, 1/10 m),
      * température (octet 14) et pression de la bouteille 1 (octets 28-29, en demi-PSI).
      */
-    private fun pnfProfile(blob: ByteArray, durationSeconds: Int?, imperial: Boolean, withPressure: Boolean): DiveProfile? {
-        val raw = unzip(blob) ?: return null
+    private fun pnfProfile(blob: ByteArray, durationSeconds: Int?, imperial: Boolean, withPressure: Boolean): DiveProfile? =
+        unzip(blob)?.let { pnfProfileFromRecords(it, durationSeconds, imperial, withPressure) }
+
+    /** Comme [pnfProfile], pour des enregistrements déjà décompressés (une plongée téléchargée en Bluetooth). */
+    internal fun pnfProfileFromRecords(raw: ByteArray, durationSeconds: Int?, imperial: Boolean, withPressure: Boolean): DiveProfile? {
         val depth = ArrayList<Double>()
         val temp = ArrayList<Double>()
         val pressure = ArrayList<Double>()

@@ -51,6 +51,8 @@ interface ContactsProvider {
     suspend fun pick(): PhoneContact? = null
 }
 
+private val AlwaysForeground = kotlinx.coroutines.flow.MutableStateFlow(true)
+
 /** Actions propres à la plateforme. */
 interface PlatformActions {
     fun openMap(latitude: Double, longitude: Double, label: String)
@@ -116,4 +118,13 @@ interface PlatformActions {
      * refuse, si la photo n'est plus accessible ou si la plateforme ne sait pas le faire : rien n'est alors supprimé.
      */
     suspend fun deletePhotoOriginal(source: String): Boolean = false
+
+    /** `true` tant que l'appli est ouverte et visible : la détection d'un ordinateur de plongée ne guette que dans ce cas. */
+    val appInForeground: kotlinx.coroutines.flow.StateFlow<Boolean> get() = AlwaysForeground
+
+    /** Garde l'écran allumé (`true`) ou rend la main au système (`false`) : un téléchargement Bluetooth dure plusieurs minutes. */
+    fun setKeepScreenOn(on: Boolean) {}
+
+    /** Bluetooth LE (téléchargement des plongées d'un ordinateur) ; `null` si la plateforme ne le propose pas. */
+    val ble: BleTransport? get() = null
 }

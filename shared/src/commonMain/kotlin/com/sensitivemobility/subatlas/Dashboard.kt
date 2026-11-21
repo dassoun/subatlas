@@ -179,7 +179,7 @@ internal fun HomeScreen(
             if (stats.countries.isNotEmpty()) add { m -> StatTile(Picto.GLOBE, stats.countries.size.toString(), s.homeCountriesTile, null, m, null) }
             stats.deepest?.let { d ->
                 add { m ->
-                    StatTile(Picto.ARROW_DOWN, "${formatNum(d.maxDepth ?: 0.0)} m", s.homeDeepest, state.site(d.siteId)?.name, m) { onOpenDive(d.id) }
+                    StatTile(Picto.ARROW_DOWN, LocalUnits.current.depth.text(d.maxDepth ?: 0.0), s.homeDeepest, state.site(d.siteId)?.name, m) { onOpenDive(d.id) }
                 }
             }
             stats.longest?.let { d ->
@@ -189,7 +189,7 @@ internal fun HomeScreen(
             }
             stats.coldest?.let { d ->
                 add { m ->
-                    StatTile(Picto.THERMOMETER, "${formatNum(d.waterTempC ?: 0.0)} °C", s.homeColdest, state.site(d.siteId)?.name, m) { onOpenDive(d.id) }
+                    StatTile(Picto.THERMOMETER, LocalUnits.current.temperature.text(d.waterTempC ?: 0.0), s.homeColdest, state.site(d.siteId)?.name, m) { onOpenDive(d.id) }
                 }
             }
             stats.favouriteSite?.let { site ->
@@ -227,7 +227,7 @@ internal fun HomeScreen(
                         Text("#${state.diveNumber(dive.id)} · " + s.dateText(dive.date), style = MaterialTheme.typography.titleMedium)
                         val site = state.site(dive.siteId)
                         if (site != null) SiteLine(site, MaterialTheme.typography.bodyMedium, maxLines = 1) else Text("?")
-                        Text(dive.listCompact(s), style = MaterialTheme.typography.bodySmall)
+                        Text(dive.listCompact(s, LocalUnits.current), style = MaterialTheme.typography.bodySmall)
                     }
                     dive.profile?.let { ProfileSparkline(it, Modifier.weight(1f).fillMaxHeight()) }
                 }

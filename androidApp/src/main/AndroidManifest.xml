@@ -8,6 +8,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Savoir si le réseau fonctionne : la carte s'ouvre en vue satellite avec du réseau, en plan sans. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Télécharger les plongées d'un ordinateur de plongée (Shearwater Peregrine…) en Bluetooth LE. Avant Android 12 : BLUETOOTH
+         et BLUETOOTH_ADMIN, avec la localisation déjà déclarée plus haut. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -43,6 +50,7 @@
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/*" />
+                <data android:mimeType="text/xml" />
             </intent-filter>
             <!-- ... ou « Ouvrir avec » depuis un gestionnaire de fichiers -->
             <intent-filter>
@@ -51,6 +59,7 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="application/*" />
+                <data android:mimeType="text/xml" />
             </intent-filter>
         </activity>
 

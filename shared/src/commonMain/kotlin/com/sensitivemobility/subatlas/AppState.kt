@@ -242,7 +242,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     private fun closestByTime(sw: ShearwaterDive, taken: Set<Long>): Dive? {
         val swStart = minutesOfDay(sw.startTime)
         // Un export Divelogs se fusionne aussi avec une plongée déjà importée d'ailleurs (Shearwater) : c'est la même plongée.
-        val sameDay = dives.filter { it.date == sw.date && it.id !in taken && (sw.fromDivelogs || it.importKey.isEmpty()) }
+        val sameDay = dives.filter { it.date == sw.date && it.id !in taken && (sw.fromLogbook || it.importKey.isEmpty()) }
         if (swStart != null) {
             val timed = sameDay
                 .mapNotNull { d -> minutesOfDay(d.startTime)?.let { d to kotlin.math.abs(it - swStart) } }
@@ -260,13 +260,23 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         var created = 0
         var merged = 0
         for (item in plan) {
-            if (item.alreadyDone) continue
+            if (item.alreadyDone) {
+                // Plongée déjà importée : rien à refaire, mais le site du carnet encore sans position reçoit celle du fichier.
+                // Seulement si le site du carnet porte le même nom (à l'orthographe près) : le rattachement d'une plongée à un site a pu être
+                // choisi par l'utilisateur, il ne faut pas lui donner la position d'un autre lieu.
+                if (item.dive.fromLogbook) item.mergeInto?.let { m ->
+                    val cur = dive(m.id) ?: m
+                    val known = site(cur.siteId)
+                    if (known != null && siteNameSimilarity(known.name, siteName(item.dive)) >= SITE_NAME_THRESHOLD) completeSitePosition(cur.siteId, item.dive)
+                }
+                continue
+            }
             val existing = item.mergeInto?.let { dive(it.id) ?: it }
             if (existing != null) {
-                val result = if (item.dive.fromDivelogs) mergeDivelogs(existing, item.dive) else mergeShearwater(existing, item.dive)
+                val result = if (item.dive.fromLogbook) mergeDivelogs(existing, item.dive) else mergeShearwater(existing, item.dive)
                 saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
                 // Divelogs donne la position du site de chaque plongée : un site du carnet encore sans position la reçoit.
-                if (item.dive.fromDivelogs) completeSitePosition(result.siteId, item.dive)
+                if (item.dive.fromLogbook) completeSitePosition(result.siteId, item.dive)
                 merged++
             } else {
                 saveDive(newDiveFrom(item.dive, declined), persist = false)
@@ -352,19 +362,29 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         // Plongée issue d'une fusion : sa courbe et ses heures sont déjà complètes.
         if (d.importKeys().size > 1) return d
         val tanks = d.tanks.toMutableList()
+        // Chaque bouteille de l'ordinateur retrouve celle du carnet qui contient le même gaz (une plongée à plusieurs gaz ne doit pas
+        // voir ses mélanges se mélanger) ; à défaut, la bouteille de même rang laissée à l'air par défaut prend le gaz de l'ordinateur ;
+        // sinon la bouteille est ajoutée.
+        val matched = HashSet<Int>()
         sw.tanks.forEachIndexed { i, t ->
-            if (i < tanks.size) {
-                val cur = tanks[i]
-                val defaultGas = cur.o2Percent == 21 && cur.hePercent == 0
-                tanks[i] = cur.copy(
+            val sameGas = tanks.indices.firstOrNull { it !in matched && tanks[it].o2Percent == t.o2Percent && tanks[it].hePercent == t.hePercent }
+            val byRank = i.takeIf { it < tanks.size && it !in matched && tanks[it].o2Percent == 21 && tanks[it].hePercent == 0 }
+            val j = sameGas ?: byRank
+            if (j != null) {
+                matched += j
+                val cur = tanks[j]
+                tanks[j] = cur.copy(
                     volumeLiters = cur.volumeLiters ?: t.volumeLiters,
                     pressureStartBar = cur.pressureStartBar ?: t.pressureStartBar,
                     pressureEndBar = cur.pressureEndBar ?: t.pressureEndBar,
-                    o2Percent = if (defaultGas) t.o2Percent else cur.o2Percent,
-                    hePercent = if (defaultGas) t.hePercent else cur.hePercent,
+                    avgDepthMeters = cur.avgDepthMeters ?: t.avgDepthMeters,
+                    usedMinutes = cur.usedMinutes ?: t.usedMinutes,
+                    o2Percent = t.o2Percent.takeIf { sameGas == null } ?: cur.o2Percent,
+                    hePercent = t.hePercent.takeIf { sameGas == null } ?: cur.hePercent,
                 )
             } else {
                 tanks += t
+                matched += tanks.lastIndex
             }
         }
         return d.copy(

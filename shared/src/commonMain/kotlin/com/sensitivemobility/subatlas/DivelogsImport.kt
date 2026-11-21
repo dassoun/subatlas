@@ -31,6 +31,13 @@ internal object DivelogsImport {
         return ShearwaterImport.ShearwaterFile(dives, skipped)
     }
 
+    /** « France Toulon » -> (« France », « Toulon ») : le pays d'abord (un à trois mots), puis la ville. */
+    fun splitLocation(location: String): Pair<String, String> {
+        val words = location.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val countryWords = (minOf(3, words.size) downTo 1).firstOrNull { n -> countryFlag(words.take(n).joinToString(" ")) != null } ?: minOf(1, words.size)
+        return words.take(countryWords).joinToString(" ") to words.drop(countryWords).joinToString(" ")
+    }
+
     private fun parseDive(xml: String): ShearwaterDive? {
         val id = tag(xml, "DIVELOGSID")?.takeIf { it.isNotBlank() } ?: tag(xml, "DIVELOGSDIVENUMBER") ?: return null
         // « 29.04.2015 » -> « 2015-04-29 »
@@ -41,10 +48,7 @@ internal object DivelogsImport {
         val duration = tag(xml, "DIVETIMESEC")?.toIntOrNull()?.takeIf { it > 0 }
 
         // « France Toulon » : le pays d'abord (un à trois mots), puis la ville, que le carnet garde dans les notes du site.
-        val words = tag(xml, "LOCATION").orEmpty().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-        val countryWords = (minOf(3, words.size) downTo 1).firstOrNull { n -> countryFlag(words.take(n).joinToString(" ")) != null } ?: minOf(1, words.size)
-        val country = words.take(countryWords).joinToString(" ")
-        val city = words.drop(countryWords).joinToString(" ")
+        val (country, city) = splitLocation(tag(xml, "LOCATION").orEmpty())
 
         val temps = tempsAndDepths(xml)
         val waterTemp = number(xml, "WATERTEMPMAXDEPTH") ?: number(xml, "WATERTEMPATEND")

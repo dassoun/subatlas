@@ -54,11 +54,11 @@ interface Strings {
     val mapNoDive: String
     val mapOpenSite: String
     val addSite: String
-    fun maxDepthShort(meters: Int): String
+    fun maxDepthShort(depth: String): String
     fun access(access: SiteAccess): String
     fun position(coords: String): String
     fun accessLine(access: SiteAccess): String
-    fun maxDepthLine(meters: Int): String
+    fun maxDepthLine(depth: String): String
     fun notesLine(notes: String): String
     val openInMaps: String
     fun confirmDelete(name: String): String
@@ -176,6 +176,65 @@ interface Strings {
     val divelogsTitle: String
     val divelogsInvalid: String
     val divelogsMergeHelp: String
+    val bleEntry: String
+    val bleTitle: String
+    val bleIntro: String
+    val bleScan: String
+    val bleScanning: String
+    val blePermissionDenied: String
+    val bleDives: String
+    val bleDeleted: String
+    val bleLog: String
+    val bleImportTitle: String
+    val bleAlready: String
+    val bleSelectNew: String
+    val bleSelectNone: String
+    val bleStop: String
+    val bleSummary: (String, String) -> String
+    fun bleDownload(n: Int): String
+    fun bleProgress(i: Int, n: Int, percent: Int): String
+    val bleConnecting: String
+    val bleReadingList: String
+    val bleKeepScreen: String
+    val computersSection: String
+    val computersHint: String
+    val peregrineTitle: String
+    val computerNone: String
+    val computerAssociate: String
+    val computerAssociated: String
+    val computerForget: String
+    val computerForgetTitle: String
+    fun computerForgetMessage(label: String): String
+    val computerForgetConfirm: String
+    val associateTitle: String
+    val associateIntro: String
+    val associateChecking: String
+    val associateNone: String
+    val associateShowAll: String
+    fun associateSeen(n: Int): String
+    val computerAuto: String
+    val computerAutoHint: String
+    val computerDetectHint: String
+    val computerImportNow: String
+    val computerImportConnecting: String
+    val computerImportReading: String
+    val computerImportApplying: String
+    val computerImportNone: String
+    fun computerImportFound(n: Int): String
+    fun computerImportAction(n: Int): String
+    val computerImportLater: String
+    fun computerImportFailed(detail: String): String
+    fun computerAssociateFailed(detail: String): String
+    fun bleLost(detail: String): String
+    val bleRestart: String
+    fun bleImportRead(n: Int): String
+    val bleCopyLog: String
+    val exportUddf: String
+    val importUddf: String
+    val uddfTitle: String
+    val uddfInvalid: String
+    val uddfHint: String
+    val uddfExported: String
     val shearwaterTitle: String
     fun shearwaterFound(total: Int, created: Int, merged: Int): String
     val shearwaterNone: String
@@ -188,6 +247,8 @@ interface Strings {
     fun shearwaterMore(count: Int): String
     fun shearwaterPresent(count: Int): String
     val advancedSection: String
+    val shareAscentColors: String
+    val shareAscentColorsHint: String
     val devSection: String
     val deleteNoGps: String
     val deleteNoGpsHint: String
@@ -214,7 +275,7 @@ interface Strings {
     val seriesPpo2: String
     val seriesTts: String
     val ascentRateLabel: String
-    fun ascentOver(limit: Int, seconds: Int): String
+    fun ascentOver(limit: String, seconds: Int): String
     val ascentFine: String
     fun shareWithCheckbox(name: String): String
     val shareTitle: String
@@ -335,6 +396,10 @@ interface Strings {
 
     // Réglages
     val themeSection: String
+    val unitsSection: String
+    val unitsMetric: String
+    val unitsImperial: String
+    val unitsHint: String
     val themeSystem: String
     val themeLight: String
     val themeDark: String
@@ -346,7 +411,7 @@ interface Strings {
     val ascentSection: String
     val ascentHint: String
     fun ascentLevel(i: Int): String
-    fun ascentLimit(v: Int): String
+    fun ascentLimit(v: String): String
     val ascentReset: String
     val ascentAdd: String
     val ascentRemove: String
@@ -371,6 +436,7 @@ interface Strings {
     val importSites: String
     val sitesHint: String
     val sitesExported: String
+    fun sitesIncomingAsk(total: Int, located: Int): String
     val sitesImportInvalid: String
     fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int): String
     val importData: String
@@ -437,14 +503,14 @@ object FrStrings : Strings {
     override val mapOpenSite = "Ouvrir la fiche"
     override val noSites = "Aucun site pour l'instant.\nAppuyez sur « Ajouter un site » pour enregistrer votre position GPS."
     override val addSite = "Ajouter un site"
-    override fun maxDepthShort(meters: Int) = "max $meters m"
+    override fun maxDepthShort(depth: String) = "max $depth"
     override fun access(access: SiteAccess) = when (access) {
         SiteAccess.SHORE -> "Depuis le bord"
         SiteAccess.BOAT -> "En bateau"
     }
     override fun position(coords: String) = "Position : $coords"
     override fun accessLine(access: SiteAccess) = "Accès : ${access(access)}"
-    override fun maxDepthLine(meters: Int) = "Profondeur max : $meters m"
+    override fun maxDepthLine(depth: String) = "Profondeur max : $depth"
     override fun notesLine(notes: String) = "Notes : $notes"
     override val openInMaps = "Ouvrir dans la carte"
     override fun confirmDelete(name: String) = "Supprimer « $name » ?"
@@ -455,7 +521,7 @@ object FrStrings : Strings {
     override val locationUnavailable = "Position indisponible. Activez le GPS et réessayez."
     override val latitude = "Latitude"
     override val longitude = "Longitude"
-    override val maxDepthField = "Profondeur max (m)"
+    override val maxDepthField = "Profondeur max"
     override val notesField = "Notes (courant, visibilité, faune…)"
 
     override val statusOk = "✓ LISTE OK"
@@ -595,6 +661,66 @@ object FrStrings : Strings {
     override val divelogsInvalid = "Ce fichier n'est pas un export Dive Logs Data (.DLD) lisible."
     override val divelogsMergeHelp =
         "Une plongée du carnet à la même date et à moins d'une heure est complétée (notes, binôme, visibilité, bouteilles, lestage…) ; rien de ce que vous avez saisi n'est écrasé, et la courbe d'une plongée déjà importée est conservée."
+    override val bleEntry = "Importer d'un Shearwater en Bluetooth"
+    override val bleTitle = "Ordinateur Shearwater"
+    override val bleIntro = "Allumez le Bluetooth de l'ordinateur (Peregrine, Perdix, Teric…) et fermez Shearwater Cloud, puis recherchez l'ordinateur et touchez-le. Les plongées qui ne sont pas encore dans le carnet sont cochées ; un aperçu demande confirmation avant tout ajout."
+    override val bleScan = "Rechercher les appareils"
+    override val bleScanning = "Recherche en cours…"
+    override val blePermissionDenied = "Permission Bluetooth refusée."
+    override val bleDives = "Plongées de l'ordinateur"
+    override val bleDeleted = "effacée"
+    override val bleLog = "Journal"
+    override val bleCopyLog = "Partager le journal"
+    override val bleImportTitle = "Import depuis l'ordinateur"
+    override val bleAlready = "déjà dans le carnet"
+    override val bleSelectNew = "Les nouvelles"
+    override val bleSelectNone = "Aucune"
+    override val bleStop = "Arrêter"
+    override val bleSummary = { model: String, firmware: String -> "$model · $firmware" }
+    override fun bleDownload(n: Int) = if (n == 0) "Rien à télécharger" else "Télécharger $n plongée${if (n > 1) "s" else ""}"
+    override fun bleProgress(i: Int, n: Int, percent: Int) = "Plongée $i sur $n · $percent %"
+    override val bleConnecting = "Connexion à l'ordinateur…"
+    override val bleReadingList = "Lecture du sommaire des plongées…"
+    override val bleKeepScreen = "Gardez l'écran allumé et l'ordinateur à portée pendant le téléchargement."
+    override val computersSection = "Importer depuis un ordinateur de plongée"
+    override val computersHint = "Associez votre ordinateur de plongée : SubAtlas le retrouvera sans nouvelle recherche parmi les appareils Bluetooth."
+    override val peregrineTitle = "Peregrine"
+    override val computerNone = "Aucun Peregrine associé."
+    override val computerAssociate = "Associer un ordinateur de plongée"
+    override val computerAssociated = "Associé : SubAtlas le reconnaît par son adresse Bluetooth."
+    override val computerForget = "Dissocier le Peregrine"
+    override val computerForgetTitle = "Dissocier le Peregrine ?"
+    override fun computerForgetMessage(label: String) = "L'association avec $label sera effacée. Les plongées déjà importées sont conservées ; il faudra associer à nouveau l'ordinateur pour le retrouver sans recherche."
+    override val computerForgetConfirm = "Dissocier"
+    override val associateTitle = "Associer un Peregrine"
+    override val associateIntro = "Activez le Bluetooth sur le Peregrine et fermez Shearwater Cloud, puis touchez votre ordinateur dans la liste."
+    override val associateChecking = "Vérification de l'ordinateur…"
+    override val associateNone = "Aucun Peregrine trouvé. Vérifiez que son Bluetooth est activé et qu'il est à portée, puis recherchez à nouveau."
+    override val associateShowAll = "Afficher tous les appareils Bluetooth"
+    override val computerAuto = "Importer automatiquement les nouvelles plongées"
+    override val computerAutoHint = "Sans demander de confirmation : une jauge et un message indiquent le traitement en cours."
+    override val computerDetectHint = "Quand SubAtlas est ouverte et que vous activez le Bluetooth du Peregrine, l'appli le détecte et propose d'importer ses nouvelles plongées."
+    override val computerImportNow = "Importer les nouvelles plongées"
+    override val computerImportConnecting = "Connexion au Peregrine…"
+    override val computerImportReading = "Lecture de la liste des plongées…"
+    override val computerImportApplying = "Ajout des plongées au carnet…"
+    override val computerImportNone = "Aucune nouvelle plongée sur le Peregrine."
+    override fun computerImportFound(n: Int) = "$n nouvelle${if (n > 1) "s" else ""} plongée${if (n > 1) "s" else ""} sur le Peregrine :"
+    override fun computerImportAction(n: Int) = "Importer ($n)"
+    override val computerImportLater = "Plus tard"
+    override fun computerImportFailed(detail: String) = "Import interrompu ($detail)."
+    override fun associateSeen(n: Int) = if (n == 0) "Aucun appareil Bluetooth vu : vérifiez que le Bluetooth et la localisation du téléphone sont activés." else "$n appareil${if (n > 1) "s" else ""} Bluetooth vu${if (n > 1) "s" else ""}, aucun n'est reconnu comme un Peregrine."
+    override fun computerAssociateFailed(detail: String) = "Cet appareil n'a pas répondu comme un ordinateur Shearwater ($detail)."
+    override fun bleLost(detail: String) = "Connexion interrompue ($detail). L'ordinateur arrête de transmettre dès que la liaison est coupée : rapprochez-le, rallumez son Bluetooth si besoin, puis touchez « Recommencer ». Les plongées déjà lues peuvent être importées."
+    override val bleRestart = "Recommencer"
+    override fun bleImportRead(n: Int) = "Importer les $n lue${if (n > 1) "s" else ""}"
+    override val exportUddf = "Exporter au format UDDF"
+    override val importUddf = "Importer un fichier UDDF"
+    override val uddfTitle = "Import UDDF"
+    override val uddfInvalid = "Ce fichier n'est pas un fichier UDDF lisible."
+    override val uddfHint =
+        "UDDF est le format d'échange des carnets de plongée (Subsurface, MacDive, divelogs.de, Shearwater Cloud…). L'export contient les plongées avec leur courbe, les sites et les mélanges de gaz."
+    override val uddfExported = "Carnet exporté au format UDDF."
     override val shearwaterTitle = "Import Shearwater"
     override fun shearwaterFound(total: Int, created: Int, merged: Int) =
         "$total plongée${if (total > 1) "s" else ""} dans ce fichier : $created nouvelle${if (created > 1) "s" else ""}, $merged à fusionner avec une plongée du carnet."
@@ -609,6 +735,8 @@ object FrStrings : Strings {
         "Une plongée du carnet à la même date et à moins d'une heure est complétée avec les données de l'ordinateur et reçoit la courbe ; rien de ce que vous avez saisi n'est écrasé."
     override fun shearwaterMore(count: Int) = "… et $count autres plongées"
     override val advancedSection = "Avancé"
+    override val shareAscentColors = "Couleurs de remontée sur l'image à partager"
+    override val shareAscentColorsHint = "Colore la courbe de l'image selon la vitesse de remontée (seuils ci-dessus). Désactivé : courbe d'une seule couleur."
     override val devSection = "Développeur"
     override val deleteNoGps = "Effacer les sites sans GPS"
     override val deleteNoGpsHint = "Supprime tous les sites sans coordonnées GPS. Les plongées sont conservées."
@@ -630,15 +758,15 @@ object FrStrings : Strings {
     override val shearwaterReading = "Lecture du fichier…"
     override val computerLabel = "Ordinateur"
     override val profileTitle = "Profil de plongée"
-    override val profileDepthLegend = "Profondeur (m)"
-    override val profilePressureLegend = "Pression (bar)"
+    override val profileDepthLegend = "Profondeur"
+    override val profilePressureLegend = "Pression"
     override val seriesNdl = "LND"
     override val seriesDeco = "Déco"
     override val seriesCns = "CNS"
     override val seriesPpo2 = "PPO2"
     override val seriesTts = "TTS"
     override val ascentRateLabel = "Vitesse de remontée"
-    override fun ascentOver(limit: Int, seconds: Int) = "au-dessus de $limit m/min pendant ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
+    override fun ascentOver(limit: String, seconds: Int) = "au-dessus de $limit pendant ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
     override val ascentFine = "toujours sous la limite"
     override fun shareWithCheckbox(name: String) = "Proposer de partager cette plongée avec $name"
     override val shareTitle = "Partager la plongée"
@@ -767,6 +895,10 @@ object FrStrings : Strings {
     override fun confirmDeleteDive(site: String, date: String) = "Supprimer la plongée du $date sur « $site » ?"
 
     override val themeSection = "Thème"
+    override val unitsSection = "Unités"
+    override val unitsMetric = "Métrique"
+    override val unitsImperial = "Impérial"
+    override val unitsHint = "Métrique : m, °C, bar, L, kg. Impérial : ft, °F, psi, cuft, lb. Les données restent enregistrées en métrique ; le volume d'une bouteille en cuft suit la convention de 3000 psi."
     override val themeSystem = "Système"
     override val themeLight = "Clair"
     override val themeDark = "Sombre"
@@ -778,7 +910,7 @@ object FrStrings : Strings {
     override val ascentSection = "Vitesse de remontée"
     override val ascentHint = "La courbe change de couleur quand la vitesse de remontée dépasse chaque seuil."
     override fun ascentLevel(i: Int) = "Seuil $i"
-    override fun ascentLimit(v: Int) = "au-delà de $v m/min"
+    override fun ascentLimit(v: String) = "au-delà de $v"
     override val ascentReset = "Valeurs par défaut"
     override val ascentAdd = "Ajouter un seuil"
     override val ascentRemove = "Retirer"
@@ -869,6 +1001,7 @@ object FrStrings : Strings {
     override val importSites = "Importer des sites"
     override val sitesHint = "Les sites seuls, dans un fichier JSON à importer sur une autre installation : les sites localisés sont ajoutés, et un site déjà connu mais sans position reçoit celle du fichier."
     override val sitesExported = "Sites exportés."
+    override fun sitesIncomingAsk(total: Int, located: Int) = "Ce fichier est un export de sites SubAtlas : $total site${if (total > 1) "s" else ""}, dont $located avec position GPS. Les sites localisés seront ajoutés, et un site déjà connu mais sans position recevra celle du fichier. Importer ?"
     override val sitesImportInvalid = "Ce fichier n'est pas un export de sites de SubAtlas."
     override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
         "$added site${if (added > 1) "s" else ""} ajouté${if (added > 1) "s" else ""}",
@@ -953,14 +1086,14 @@ object EnStrings : Strings {
     override val mapOpenSite = "Open the site"
     override val noSites = "No sites yet.\nTap “Add a site” to save your GPS position."
     override val addSite = "Add a site"
-    override fun maxDepthShort(meters: Int) = "max $meters m"
+    override fun maxDepthShort(depth: String) = "max $depth"
     override fun access(access: SiteAccess) = when (access) {
         SiteAccess.SHORE -> "From shore"
         SiteAccess.BOAT -> "By boat"
     }
     override fun position(coords: String) = "Position: $coords"
     override fun accessLine(access: SiteAccess) = "Access: ${access(access)}"
-    override fun maxDepthLine(meters: Int) = "Max depth: $meters m"
+    override fun maxDepthLine(depth: String) = "Max depth: $depth"
     override fun notesLine(notes: String) = "Notes: $notes"
     override val openInMaps = "Open in maps"
     override fun confirmDelete(name: String) = "Delete “$name”?"
@@ -971,7 +1104,7 @@ object EnStrings : Strings {
     override val locationUnavailable = "Position unavailable. Turn on GPS and try again."
     override val latitude = "Latitude"
     override val longitude = "Longitude"
-    override val maxDepthField = "Max depth (m)"
+    override val maxDepthField = "Max depth"
     override val notesField = "Notes (current, visibility, wildlife…)"
 
     override val statusOk = "✓ LIST OK"
@@ -1111,6 +1244,66 @@ object EnStrings : Strings {
     override val divelogsInvalid = "This file is not a readable Dive Logs Data (.DLD) export."
     override val divelogsMergeHelp =
         "A logbook dive on the same date within an hour is completed (notes, buddy, visibility, tanks, weight…); nothing you entered is overwritten, and the profile of an already imported dive is kept."
+    override val bleEntry = "Import from a Shearwater over Bluetooth"
+    override val bleTitle = "Shearwater computer"
+    override val bleIntro = "Turn on the computer's Bluetooth (Peregrine, Perdix, Teric…) and close Shearwater Cloud, then search for the computer and tap it. Dives not yet in the logbook are ticked; a preview asks for confirmation before anything is added."
+    override val bleScan = "Search for devices"
+    override val bleScanning = "Searching…"
+    override val blePermissionDenied = "Bluetooth permission denied."
+    override val bleDives = "Dives on the computer"
+    override val bleDeleted = "deleted"
+    override val bleLog = "Log"
+    override val bleCopyLog = "Share log"
+    override val bleImportTitle = "Import from the computer"
+    override val bleAlready = "already in the logbook"
+    override val bleSelectNew = "New ones"
+    override val bleSelectNone = "None"
+    override val bleStop = "Stop"
+    override val bleSummary = { model: String, firmware: String -> "$model · $firmware" }
+    override fun bleDownload(n: Int) = if (n == 0) "Nothing to download" else "Download $n dive${if (n != 1) "s" else ""}"
+    override fun bleProgress(i: Int, n: Int, percent: Int) = "Dive $i of $n · $percent %"
+    override val bleConnecting = "Connecting to the computer…"
+    override val bleReadingList = "Reading the dive list…"
+    override val bleKeepScreen = "Keep the screen on and the computer within reach during the download."
+    override val computersSection = "Import from a dive computer"
+    override val computersHint = "Pair your dive computer: SubAtlas will find it again without searching through all Bluetooth devices."
+    override val peregrineTitle = "Peregrine"
+    override val computerNone = "No Peregrine paired."
+    override val computerAssociate = "Pair a dive computer"
+    override val computerAssociated = "Paired: SubAtlas recognises it by its Bluetooth address."
+    override val computerForget = "Unpair the Peregrine"
+    override val computerForgetTitle = "Unpair the Peregrine?"
+    override fun computerForgetMessage(label: String) = "The pairing with $label will be erased. Dives already imported are kept; you will need to pair the computer again to find it without searching."
+    override val computerForgetConfirm = "Unpair"
+    override val associateTitle = "Pair a Peregrine"
+    override val associateIntro = "Turn on the Peregrine's Bluetooth and close Shearwater Cloud, then tap your computer in the list."
+    override val associateChecking = "Checking the computer…"
+    override val associateNone = "No Peregrine found. Check that its Bluetooth is on and that it is within range, then search again."
+    override val associateShowAll = "Show all Bluetooth devices"
+    override val computerAuto = "Import new dives automatically"
+    override val computerAutoHint = "Without asking for confirmation: a gauge and a message show what is being processed."
+    override val computerDetectHint = "When SubAtlas is open and you turn on the Peregrine's Bluetooth, the app detects it and offers to import its new dives."
+    override val computerImportNow = "Import new dives"
+    override val computerImportConnecting = "Connecting to the Peregrine…"
+    override val computerImportReading = "Reading the dive list…"
+    override val computerImportApplying = "Adding the dives to the logbook…"
+    override val computerImportNone = "No new dive on the Peregrine."
+    override fun computerImportFound(n: Int) = "$n new dive${if (n != 1) "s" else ""} on the Peregrine:"
+    override fun computerImportAction(n: Int) = "Import ($n)"
+    override val computerImportLater = "Later"
+    override fun computerImportFailed(detail: String) = "Import interrupted ($detail)."
+    override fun associateSeen(n: Int) = if (n == 0) "No Bluetooth device seen: check that the phone's Bluetooth and location are on." else "$n Bluetooth device${if (n != 1) "s" else ""} seen, none recognised as a Peregrine."
+    override fun computerAssociateFailed(detail: String) = "This device did not answer like a Shearwater computer ($detail)."
+    override fun bleLost(detail: String) = "Connection lost ($detail). The computer stops transmitting as soon as the link is cut: bring it closer, turn its Bluetooth back on if needed, then tap “Start over”. The dives already read can be imported."
+    override val bleRestart = "Start over"
+    override fun bleImportRead(n: Int) = "Import the $n already read"
+    override val exportUddf = "Export as UDDF"
+    override val importUddf = "Import a UDDF file"
+    override val uddfTitle = "UDDF import"
+    override val uddfInvalid = "This file is not a readable UDDF file."
+    override val uddfHint =
+        "UDDF is the exchange format of dive logs (Subsurface, MacDive, divelogs.de, Shearwater Cloud…). The export holds the dives with their profile, the sites and the gas mixes."
+    override val uddfExported = "Logbook exported as UDDF."
     override val shearwaterTitle = "Shearwater import"
     override fun shearwaterFound(total: Int, created: Int, merged: Int) =
         "$total dive${if (total != 1) "s" else ""} in this file: $created new, $merged to merge with a logbook dive."
@@ -1124,6 +1317,8 @@ object EnStrings : Strings {
         "A logbook dive on the same date and within one hour is completed with the computer's data and gets the profile; nothing you typed is overwritten."
     override fun shearwaterMore(count: Int) = "… and $count more dives"
     override val advancedSection = "Advanced"
+    override val shareAscentColors = "Ascent colours on the shared image"
+    override val shareAscentColorsHint = "Colours the image's profile by ascent rate (thresholds above). Off: a single-colour profile."
     override val devSection = "Developer"
     override val deleteNoGps = "Delete sites without GPS"
     override val deleteNoGpsHint = "Deletes every site without GPS coordinates. Dives are kept."
@@ -1145,15 +1340,15 @@ object EnStrings : Strings {
     override val shearwaterReading = "Reading the file…"
     override val computerLabel = "Dive computer"
     override val profileTitle = "Dive profile"
-    override val profileDepthLegend = "Depth (m)"
-    override val profilePressureLegend = "Pressure (bar)"
+    override val profileDepthLegend = "Depth"
+    override val profilePressureLegend = "Pressure"
     override val seriesNdl = "NDL"
     override val seriesDeco = "Deco"
     override val seriesCns = "CNS"
     override val seriesPpo2 = "PPO2"
     override val seriesTts = "TTS"
     override val ascentRateLabel = "Ascent rate"
-    override fun ascentOver(limit: Int, seconds: Int) = "above $limit m/min for ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
+    override fun ascentOver(limit: String, seconds: Int) = "above $limit for ${if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"}"
     override val ascentFine = "always under the limit"
     override fun shareWithCheckbox(name: String) = "Offer to share this dive with $name"
     override val shareTitle = "Share the dive"
@@ -1282,6 +1477,10 @@ object EnStrings : Strings {
     override fun confirmDeleteDive(site: String, date: String) = "Delete the dive of $date at “$site”?"
 
     override val themeSection = "Theme"
+    override val unitsSection = "Units"
+    override val unitsMetric = "Metric"
+    override val unitsImperial = "Imperial"
+    override val unitsHint = "Metric: m, °C, bar, L, kg. Imperial: ft, °F, psi, cuft, lb. Data stays stored in metric; a tank's volume in cuft follows the 3000 psi convention."
     override val themeSystem = "System"
     override val themeLight = "Light"
     override val themeDark = "Dark"
@@ -1293,7 +1492,7 @@ object EnStrings : Strings {
     override val ascentSection = "Ascent rate"
     override val ascentHint = "The curve changes colour when the ascent rate goes above each threshold."
     override fun ascentLevel(i: Int) = "Threshold $i"
-    override fun ascentLimit(v: Int) = "above $v m/min"
+    override fun ascentLimit(v: String) = "above $v"
     override val ascentReset = "Reset to defaults"
     override val ascentAdd = "Add a threshold"
     override val ascentRemove = "Remove"
@@ -1384,6 +1583,7 @@ object EnStrings : Strings {
     override val importSites = "Import sites"
     override val sitesHint = "Sites only, in a JSON file to import into another installation: located sites are added, and a known site without a position gets the one from the file."
     override val sitesExported = "Sites exported."
+    override fun sitesIncomingAsk(total: Int, located: Int) = "This file is a SubAtlas sites export: $total site${if (total != 1) "s" else ""}, $located with a GPS position. Located sites will be added, and a known site without a position will get the one from the file. Import?"
     override val sitesImportInvalid = "This file is not a SubAtlas sites export."
     override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
         "$added site${if (added != 1) "s" else ""} added",

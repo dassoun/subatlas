@@ -124,9 +124,9 @@ private fun Tank.gasLabel(s: Strings): String = when {
     else -> "${s.gasNitrox} $o2Percent"
 }
 
-private fun Tank.pressureText(): String? = when {
-    pressureStartBar != null && pressureEndBar != null -> "$pressureStartBar → $pressureEndBar bar"
-    pressureStartBar != null -> "$pressureStartBar bar"
+private fun Tank.pressureText(u: Units): String? = when {
+    pressureStartBar != null && pressureEndBar != null -> "${u.pressure.number(pressureStartBar.toDouble())} → ${u.pressure.text(pressureEndBar.toDouble())}"
+    pressureStartBar != null -> u.pressure.text(pressureStartBar.toDouble())
     else -> null
 }
 
@@ -154,6 +154,8 @@ internal fun DiveList(
     onShared: (SharedDive) -> Unit,
     actions: PlatformActions,
     listState: LazyListState,
+    focusId: Long? = null,
+    onFocused: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     var pasting by remember { mutableStateOf(false) }
@@ -192,6 +194,20 @@ internal fun DiveList(
         val sortedDives = state.sortedDives(sort, descending)
         // Triées par date, les plongées sont regroupées par mois ; les autres tris n'ont pas de titres.
         val groups = remember(sortedDives, sort, s) { diveGroups(sortedDives, byMonth = sort == DiveSort.DATE, s) }
+        // Retour de la fiche d'une plongée : la liste se replace sur celle qu'on regardait (une ligne de contexte au-dessus).
+        LaunchedEffect(focusId) {
+            if (focusId == null) return@LaunchedEffect
+            var index = if (state.dives.isEmpty()) 1 else 0
+            var found = -1
+            for (g in groups) {
+                if (g.label != null) index++
+                val at = g.dives.indexOfFirst { it.id == focusId }
+                if (at >= 0) { found = index + at; break }
+                index += g.dives.size
+            }
+            if (found >= 0) listState.scrollToItem((found - 1).coerceAtLeast(0))
+            onFocused()
+        }
         LazyColumn(
             Modifier.weight(1f),
             state = listState,
@@ -232,7 +248,7 @@ internal fun DiveList(
                                 val diveSite = state.site(dive.siteId)
                                 if (diveSite != null) SiteLine(diveSite, MaterialTheme.typography.bodyMedium, maxLines = 1) else Text("?")
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(dive.listCompact(s), style = MaterialTheme.typography.bodySmall)
+                                    Text(dive.listCompact(s, LocalUnits.current), style = MaterialTheme.typography.bodySmall)
                                     // Pastille « photos » : le pictogramme et leur nombre.
                                     if (dive.photos.isNotEmpty()) {
                                         Spacer(Modifier.width(10.dp))
@@ -272,16 +288,23 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
     var declined by remember { mutableStateOf<Set<String>>(emptySet()) }
     var reading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var bleOpen by remember { mutableStateOf(false) }
 
     // Import d'un export Shearwater Cloud : on lit le fichier, on prépare la fusion, puis l'utilisateur confirme.
-    fun startShearwaterImport(divelogs: Boolean = false) {
+    fun startShearwaterImport(divelogs: Boolean = false, uddf: Boolean = false) {
         scope.launch {
             try {
                 val bytes = actions.openFileBytes() ?: return@launch
                 reading = true
                 // Un gros fichier se lit en quelques secondes : hors du fil principal pour ne pas figer l'écran.
                 val file = try {
-                    withContext(Dispatchers.Default) { if (divelogs) DivelogsImport.parse(bytes) else ShearwaterImport.parse(bytes) }
+                    withContext(Dispatchers.Default) {
+                        when {
+                            uddf -> UddfImport.parse(bytes)
+                            divelogs -> DivelogsImport.parse(bytes)
+                            else -> ShearwaterImport.parse(bytes)
+                        }
+                    }
                 } finally {
                     reading = false
                 }
@@ -298,6 +321,8 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
                 message = s.shearwaterInvalid
             } catch (e: DivelogsImport.NotDivelogsException) {
                 message = s.divelogsInvalid
+            } catch (e: UddfImport.NotUddfException) {
+                message = s.uddfInvalid
             } catch (e: Exception) {
                 message = s.importFailed(e.message ?: s.unknownError)
             }
@@ -306,6 +331,24 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
 
     OutlinedButton(onClick = { startShearwaterImport() }, modifier = Modifier.fillMaxWidth()) { Text(s.importShearwater) }
     OutlinedButton(onClick = { startShearwaterImport(divelogs = true) }, modifier = Modifier.fillMaxWidth()) { Text(s.importDivelogs) }
+    OutlinedButton(onClick = { startShearwaterImport(uddf = true) }, modifier = Modifier.fillMaxWidth()) { Text(s.importUddf) }
+    actions.ble?.let { ble ->
+        OutlinedButton(onClick = { bleOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(s.bleEntry) }
+        if (bleOpen) {
+            ShearwaterBleDialog(
+                ble, actions, state,
+                onDives = { list ->
+                    bleOpen = false
+                    planSkipped = 0
+                    val newPlan = state.planShearwaterImport(list)
+                    siteMatches = state.similarSiteMatches(newPlan)
+                    declined = emptySet()
+                    plan = newPlan
+                },
+                onDismiss = { bleOpen = false },
+            )
+        }
+    }
     if (reading) ReadingDialog()
     plan?.let { items ->
         ShearwaterPlanDialog(
@@ -390,7 +433,7 @@ internal fun ShearwaterPlanDialog(
                 style = MaterialTheme.typography.titleSmall,
             )
             val details = listOfNotNull(
-                sw.maxDepth?.let { "max ${formatNum(it)} m" },
+                sw.maxDepth?.let { "max ${LocalUnits.current.depth.text(it)}" },
                 sw.durationSeconds?.let { s.minutesShort(it / 60) },
                 tag.ifEmpty { null },
             )
@@ -400,7 +443,7 @@ internal fun ShearwaterPlanDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (items.any { it.dive.fromDivelogs }) s.divelogsTitle else s.shearwaterTitle) },
+        title = { Text(when { items.any { it.dive.fromDevice } -> s.bleImportTitle; items.any { it.dive.fromUddf } -> s.uddfTitle; items.any { it.dive.fromDivelogs } -> s.divelogsTitle; else -> s.shearwaterTitle }) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (todo.isNotEmpty()) Text(s.shearwaterFound(todo.size, todo.size - merged, merged))
@@ -436,10 +479,10 @@ internal fun ShearwaterPlanDialog(
                     if (showPresent) present.forEach { PlanRow(it, "", MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 if (skipped > 0) Text(s.shearwaterSkipped(skipped), style = MaterialTheme.typography.bodySmall, color = StatusWarn)
-                if (merged > 0) Text(if (items.any { it.dive.fromDivelogs }) s.divelogsMergeHelp else s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
+                if (merged > 0) Text(if (items.any { it.dive.fromLogbook }) s.divelogsMergeHelp else s.shearwaterMergeHelp, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = onConfirm, enabled = todo.isNotEmpty()) { Text(s.shearwaterConfirm) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = todo.isNotEmpty() || present.any { it.dive.fromLogbook && it.dive.latitude != null }) { Text(s.shearwaterConfirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
     )
 }
@@ -477,22 +520,22 @@ private fun Dive.suitSummary(s: Strings): String? {
 
 /** Ligne de résumé de la liste : horaires, profondeur max, eau, combinaison, volumes, lestage. */
 /** Résumé de la liste : durée et profondeur seulement. */
-internal fun Dive.listCompact(s: Strings): String = listOfNotNull(
+internal fun Dive.listCompact(s: Strings, u: Units): String = listOfNotNull(
     durationMinutes?.let { s.minutesShort(it) },
-    maxDepth?.let { "max ${formatNum(it)} m" },
+    maxDepth?.let { "max ${u.depth.text(it)}" },
 ).joinToString(" · ")
 
-private fun Dive.listSummary(s: Strings): String {
+private fun Dive.listSummary(s: Strings, u: Units): String {
     val volumes = tanks.mapNotNull { it.volumeLiters }.takeIf { it.isNotEmpty() }
-        ?.joinToString(" + ") { formatNum(it) }?.let { "$it\u00A0L" }
+        ?.joinToString(" + ") { u.tankVolume.number(it) }?.let { "$it\u00A0${u.tankVolume.unit}" }
     return listOfNotNull(
         timeRangeText(s),
-        maxDepth?.let { "max\u00A0${formatNum(it)}\u00A0m" },
-        waterTempC?.let { "${formatNum(it)}\u00A0°C" },
+        maxDepth?.let { "max\u00A0${u.depth.text(it, nbsp = true)}" },
+        waterTempC?.let { u.temperature.text(it, nbsp = true) },
         suitSummary(s),
         volumes,
-        weightKg?.let { "${formatNum(it)}\u00A0kg" },
-        sacLitersPerMin?.let { "SAC\u00A0${formatNum(round(it * 10) / 10)}\u00A0L/min" },
+        weightKg?.let { u.weight.text(it, nbsp = true) },
+        sacLitersPerMin?.let { "SAC\u00A0${u.sac.text(it, nbsp = true)}" },
     ).joinToString(" · ")
 }
 
@@ -516,7 +559,7 @@ internal fun SiteDivesSection(dives: List<Dive>, onOpen: (Long) -> Unit) {
                 Text(s.dateText(d.date), style = MaterialTheme.typography.titleSmall)
                 val details = listOfNotNull(
                     d.timeRangeText(s),
-                    d.maxDepth?.let { "max ${formatNum(it)} m" },
+                    d.maxDepth?.let { "max ${LocalUnits.current.depth.text(it)}" },
                 ).joinToString(" · ")
                 if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall)
             }
@@ -574,6 +617,7 @@ internal fun DiveDetailView(
     onOpenProcedure: () -> Unit = {},
 ) {
     val s = LocalStrings.current
+    val u = LocalUnits.current
     var confirm by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
@@ -637,16 +681,17 @@ internal fun DiveDetailView(
 
         // Chiffres clés en tuiles : un pictogramme et le libellé en petit, la valeur en grand dessous.
         val tiles = listOfNotNull(
-            dive.maxDepth?.let { Triple(Picto.ARROW_DOWN, s.depthLabel, "${formatNum(it)} m") },
-            dive.avgDepthMeters?.let { Triple(Picto.DEPTH_SPAN, s.avgDepthLabel, "${formatNum(it)} m") },
+            dive.maxDepth?.let { Triple(Picto.ARROW_DOWN, s.depthLabel, u.depth.text(it)) },
+            dive.avgDepthMeters?.let { Triple(Picto.DEPTH_SPAN, s.avgDepthLabel, u.depth.text(it)) },
             dive.durationMinutes?.let { Triple(Picto.STOPWATCH, s.durationLabel, s.minutesShort(it)) },
-            dive.sacLitersPerMin?.let { Triple(Picto.GAUGE, s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min") },
-            dive.waterTempC?.let { Triple(Picto.THERMOMETER, s.waterTemp, "${formatNum(it)} °C") },
-            dive.visibilityMeters?.let { Triple(Picto.EYE, s.visibility, "$it m") },
+            dive.sacLitersPerMin?.let { Triple(Picto.GAUGE, s.sacLabel, u.sac.text(it)) },
+            dive.waterTempC?.let { Triple(Picto.THERMOMETER, s.waterTemp, u.temperature.text(it)) },
+            dive.visibilityMeters?.let { Triple(Picto.EYE, s.visibility, u.depth.text(it.toDouble())) },
         )
         tiles.chunked(2).forEach { rowTiles ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowTiles.forEach { (icon, label, value) -> DiveStatTile(icon, label, value, Modifier.weight(1f)) }
+            // Les tuiles d'une même rangée ont la même hauteur, même si l'une d'elles passe à la ligne (libellé ou valeur long).
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowTiles.forEach { (icon, label, value) -> DiveStatTile(icon, label, value, Modifier.weight(1f).fillMaxHeight()) }
                 if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
             }
         }
@@ -662,14 +707,14 @@ internal fun DiveDetailView(
 
         dive.tanks.forEachIndexed { i, tank ->
             FactCard("${s.tankTitle(i + 1)} · ${tank.gasLabel(s)}") {
-                tank.volumeLiters?.let { Fact(s.volume, "${formatNum(it)} L") }
-                tank.pressureText()?.let { Fact(s.pressureLabel, it) }
-                tank.avgDepthMeters?.let { Fact(s.avgDepthLabel, "${formatNum(it)} m") }
+                tank.volumeLiters?.let { Fact(s.volume, u.tankVolume.text(it)) }
+                tank.pressureText(u)?.let { Fact(s.pressureLabel, it) }
+                tank.avgDepthMeters?.let { Fact(s.avgDepthLabel, u.depth.text(it)) }
                 tank.usedMinutes?.let { Fact(s.usedMinutesLabel, s.minutesShort(it)) }
-                tank.consumedLiters?.let { Fact(s.consumedLabel, "${round(it).toInt()} L") }
+                tank.consumedLiters?.let { Fact(s.consumedLabel, u.gas.text(it)) }
                 // Avec plusieurs bouteilles, chacune a son SAC (si on connaît sa durée d'utilisation).
                 if (dive.tanks.size > 1) {
-                    tank.sacLitersPerMin(null, dive.avgDepthMeters)?.let { Fact(s.sacLabel, "${formatNum(round(it * 10) / 10)} L/min", highlight = true) }
+                    tank.sacLitersPerMin(null, dive.avgDepthMeters)?.let { Fact(s.sacLabel, u.sac.text(it), highlight = true) }
                 }
             }
         }
@@ -686,7 +731,7 @@ internal fun DiveDetailView(
         if (hasFacts) {
             FactCard(s.conditionsSection) {
                 if (suitText.isNotEmpty()) Fact(s.suit, suitText)
-                dive.weightKg?.let { Fact(s.weight, "${formatNum(it)} kg") }
+                dive.weightKg?.let { Fact(s.weight, u.weight.text(it)) }
                 if (dive.buddy.isNotBlank()) Fact(s.buddy, dive.buddy)
                 if (dive.group.isNotEmpty()) Fact(s.groupSection, dive.group.joinToString(", ") { it.name })
                 if (dive.computer.isNotBlank()) Fact(s.computerLabel, dive.computer)
@@ -824,24 +869,25 @@ private data class TankForm(
     val minutesOk get() = minutes.isBlank() || (minutes.trim().toIntOrNull() ?: 0) > 0
     val valid get() = volumeOk && o2Ok && heOk && pStartOk && pEndOk && avgDepthOk && minutesOk
 
-    fun toTank() = Tank(
-        volumeLiters = volume.toDec(),
+    /** La bouteille en métrique ; [original] (la bouteille d'avant la saisie) garde sa valeur exacte quand le champ n'a pas été touché. */
+    fun toTank(u: Units, original: Tank?) = Tank(
+        volumeLiters = u.tankVolume.fromInput(volume, original?.volumeLiters),
         o2Percent = o2Val ?: 21,
         hePercent = heVal ?: 0,
-        pressureStartBar = pStart.trim().toIntOrNull(),
-        pressureEndBar = pEnd.trim().toIntOrNull(),
-        avgDepthMeters = avgDepth.toDec(),
+        pressureStartBar = u.pressure.fromInput(pStart, original?.pressureStartBar?.toDouble())?.let { kotlin.math.round(it).toInt() },
+        pressureEndBar = u.pressure.fromInput(pEnd, original?.pressureEndBar?.toDouble())?.let { kotlin.math.round(it).toInt() },
+        avgDepthMeters = u.depth.fromInput(avgDepth, original?.avgDepthMeters),
         usedMinutes = minutes.trim().toIntOrNull(),
     )
 }
 
-private fun Tank.toForm() = TankForm(
-    volume = volumeLiters?.let(::formatNum) ?: "",
+private fun Tank.toForm(u: Units) = TankForm(
+    volume = u.tankVolume.input(volumeLiters),
     o2 = o2Percent.toString(),
     he = hePercent.toString(),
-    pStart = pressureStartBar?.toString() ?: "",
-    pEnd = pressureEndBar?.toString() ?: "",
-    avgDepth = avgDepthMeters?.let(::formatNum) ?: "",
+    pStart = u.pressure.input(pressureStartBar?.toDouble()),
+    pEnd = u.pressure.input(pressureEndBar?.toDouble()),
+    avgDepth = u.depth.input(avgDepthMeters),
     minutes = usedMinutes?.toString() ?: "",
 )
 
@@ -877,6 +923,7 @@ internal fun DiveForm(
     onDone: () -> Unit,
 ) {
     val s = LocalStrings.current
+    val u = LocalUnits.current
     val scope = rememberCoroutineScope()
 
     var siteId by remember { mutableStateOf(existing?.siteId ?: presetSiteId) }
@@ -887,13 +934,13 @@ internal fun DiveForm(
         // Une nouvelle plongée reprend le volume et le mélange de la dernière bouteille utilisée.
         val last = state.dives.sortedWith(diveOrder).firstOrNull()?.tanks?.firstOrNull()
         mutableStateListOf<TankForm>().apply {
-            val initial = existing?.tanks?.map { it.toForm() }?.takeIf { it.isNotEmpty() }
-                ?: listOf(last?.let { TankForm(volume = it.volumeLiters?.let(::formatNum) ?: "", o2 = it.o2Percent.toString(), he = it.hePercent.toString()) } ?: TankForm(volume = "12"))
+            val initial = existing?.tanks?.map { it.toForm(u) }?.takeIf { it.isNotEmpty() }
+                ?: listOf(last?.let { TankForm(volume = u.tankVolume.input(it.volumeLiters), o2 = it.o2Percent.toString(), he = it.hePercent.toString()) } ?: TankForm(volume = u.tankVolume.input(12.0)))
             addAll(initial)
         }
     }
-    var maxDepth by remember { mutableStateOf(existing?.maxDepth?.let(::formatNum) ?: "") }
-    var avgDepth by remember { mutableStateOf(existing?.avgDepthMeters?.let(::formatNum) ?: "") }
+    var maxDepth by remember { mutableStateOf(u.depth.input(existing?.maxDepth)) }
+    var avgDepth by remember { mutableStateOf(u.depth.input(existing?.avgDepthMeters)) }
     var kind by remember { mutableStateOf(existing?.kind) }
     var kindOther by remember { mutableStateOf(existing?.kindOther ?: "") }
     val group = remember {
@@ -903,9 +950,9 @@ internal fun DiveForm(
     }
     var shareGroupAfter by remember { mutableStateOf(false) }
     var shareList by remember { mutableStateOf<List<Person>>(emptyList()) }
-    var waterTemp by remember { mutableStateOf(existing?.waterTempC?.let(::formatNum) ?: "") }
-    var visibility by remember { mutableStateOf(existing?.visibilityMeters?.toString() ?: "") }
-    var weight by remember { mutableStateOf(existing?.weightKg?.let(::formatNum) ?: "") }
+    var waterTemp by remember { mutableStateOf(u.temperature.input(existing?.waterTempC)) }
+    var visibility by remember { mutableStateOf(u.depth.input(existing?.visibilityMeters?.toDouble())) }
+    var weight by remember { mutableStateOf(u.weight.input(existing?.weightKg)) }
     var suitType by remember { mutableStateOf(existing?.suitType) }
     var thickness by remember { mutableStateOf(existing?.suitThicknessMm?.let(::formatNum) ?: "") }
     var buddy by remember { mutableStateOf(existing?.buddy ?: "") }
@@ -960,7 +1007,7 @@ internal fun DiveForm(
     val extrasOk = (maxDepth.isBlank() || maxDepth.toDec() != null) &&
         (avgDepth.isBlank() || avgDepth.toDec() != null) &&
         (waterTemp.isBlank() || waterTemp.toDec() != null) &&
-        (visibility.isBlank() || visibility.trim().toIntOrNull() != null) &&
+        (visibility.isBlank() || visibility.toDec() != null) &&
         (weight.isBlank() || weight.toDec() != null) &&
         (thickness.isBlank() || thickness.toDec() != null)
     val valid = selectedSite != null && tanks.all { it.valid } && extrasOk
@@ -977,12 +1024,12 @@ internal fun DiveForm(
                 date = date,
                 startTime = startTime,
                 endTime = endTime,
-                tanks = tanks.map { it.toTank() },
-                maxDepthMeters = maxDepth.toDec(),
-                avgDepthMeters = avgDepth.toDec(),
-                waterTempC = waterTemp.toDec(),
-                visibilityMeters = visibility.trim().toIntOrNull(),
-                weightKg = weight.toDec(),
+                tanks = tanks.mapIndexed { i, f -> f.toTank(u, existing?.tanks?.getOrNull(i)) },
+                maxDepthMeters = u.depth.fromInput(maxDepth, existing?.maxDepth),
+                avgDepthMeters = u.depth.fromInput(avgDepth, existing?.avgDepthMeters),
+                waterTempC = u.temperature.fromInput(waterTemp, existing?.waterTempC),
+                visibilityMeters = u.depth.fromInput(visibility, existing?.visibilityMeters?.toDouble())?.let { kotlin.math.round(it).toInt() },
+                weightKg = u.weight.fromInput(weight, existing?.weightKg),
                 suit = existing?.suit.orEmpty(),
                 suitType = suitType,
                 suitThicknessMm = if (suitType?.hasThickness == true) thickness.toDec() else null,
@@ -1081,7 +1128,7 @@ internal fun DiveForm(
                                 // Globe quand le site a une position GPS.
                                 if (la != null && lo != null) PictoText(site.fullName(), Picto.GLOBE, iconAtEnd = true) else Text(site.fullName())
                                 val sub = if (here != null && la != null && lo != null) {
-                                    s.distanceAway(formatDistance(distanceMeters(here.latitude, here.longitude, la, lo)))
+                                    s.distanceAway(LocalUnits.current.distance(distanceMeters(here.latitude, here.longitude, la, lo)))
                                 } else if (la == null || lo == null) {
                                     s.noPositionShort
                                 } else {
@@ -1179,8 +1226,8 @@ internal fun DiveForm(
         }
 
         // --- Profondeurs
-        NumField(s.depthLabel, maxDepth, { maxDepth = it }, Modifier.fillMaxWidth(), error = maxDepth.isNotBlank() && maxDepth.toDec() == null, unit = "m")
-        NumField(s.avgDepthLabel, avgDepth, { avgDepth = it }, Modifier.fillMaxWidth(), error = avgDepth.isNotBlank() && avgDepth.toDec() == null, unit = "m")
+        NumField(s.depthLabel, maxDepth, { maxDepth = it }, Modifier.fillMaxWidth(), error = maxDepth.isNotBlank() && maxDepth.toDec() == null, unit = u.depth.unit)
+        NumField(s.avgDepthLabel, avgDepth, { avgDepth = it }, Modifier.fillMaxWidth(), error = avgDepth.isNotBlank() && avgDepth.toDec() == null, unit = u.depth.unit)
         Text(s.avgDepthHint, style = MaterialTheme.typography.bodySmall)
 
         // --- Bouteilles
@@ -1205,8 +1252,8 @@ internal fun DiveForm(
 
         // --- Conditions et matériel
         Text(s.conditionsSection, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        NumField(s.waterTemp, waterTemp, { waterTemp = it }, Modifier.fillMaxWidth(), error = waterTemp.isNotBlank() && waterTemp.toDec() == null, unit = "°C")
-        NumField(s.visibility, visibility, { visibility = it }, Modifier.fillMaxWidth(), decimal = false, error = visibility.isNotBlank() && visibility.trim().toIntOrNull() == null, unit = "m")
+        NumField(s.waterTemp, waterTemp, { waterTemp = it }, Modifier.fillMaxWidth(), error = waterTemp.isNotBlank() && waterTemp.toDec() == null, unit = u.temperature.unit)
+        NumField(s.visibility, visibility, { visibility = it }, Modifier.fillMaxWidth(), decimal = false, error = visibility.isNotBlank() && visibility.toDec() == null, unit = u.depth.unit)
         Text(s.suit, style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SuitType.entries.forEach { type ->
@@ -1223,7 +1270,7 @@ internal fun DiveForm(
             NumField(s.thickness, thickness, { thickness = it }, Modifier.fillMaxWidth(), error = thickness.isNotBlank() && thickness.toDec() == null, unit = "mm")
         }
         // La combinaison avant le lestage, comme dans la fiche.
-        NumField(s.weight, weight, { weight = it }, Modifier.fillMaxWidth(), error = weight.isNotBlank() && weight.toDec() == null, unit = "kg")
+        NumField(s.weight, weight, { weight = it }, Modifier.fillMaxWidth(), error = weight.isNotBlank() && weight.toDec() == null, unit = u.weight.unit)
         BuddyField(
             state = state,
             contacts = contacts,
@@ -1355,6 +1402,7 @@ private fun TankEditor(
     onRemove: () -> Unit,
 ) {
     val s = LocalStrings.current
+    val u = LocalUnits.current
     val kind = when {
         (tank.he.trim().toIntOrNull() ?: 0) > 0 -> 2
         (tank.o2.trim().toIntOrNull() ?: 21) != 21 -> 1
@@ -1370,8 +1418,8 @@ private fun TankEditor(
                 if (canRemove) TextButton(onClick = onRemove) { Text(s.removeTank, color = MaterialTheme.colorScheme.error) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumField(s.volume, tank.volume, { onChange(tank.copy(volume = it)) }, Modifier.weight(1f), error = !tank.volumeOk, unit = "L")
-                NumField(s.avgDepthShort, tank.avgDepth, { onChange(tank.copy(avgDepth = it)) }, Modifier.weight(1f), error = !tank.avgDepthOk, unit = "m")
+                NumField(s.volume, tank.volume, { onChange(tank.copy(volume = it)) }, Modifier.weight(1f), error = !tank.volumeOk, unit = u.tankVolume.unit)
+                NumField(s.avgDepthShort, tank.avgDepth, { onChange(tank.copy(avgDepth = it)) }, Modifier.weight(1f), error = !tank.avgDepthOk, unit = u.depth.unit)
             }
             if (showMinutes) {
                 NumField(
@@ -1402,8 +1450,8 @@ private fun TankEditor(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumField(s.pressureStart, tank.pStart, { onChange(tank.copy(pStart = it.filter(Char::isDigit))) }, Modifier.weight(1f), decimal = false, error = !tank.pStartOk, unit = "bar")
-                NumField(s.pressureEnd, tank.pEnd, { onChange(tank.copy(pEnd = it.filter(Char::isDigit))) }, Modifier.weight(1f), decimal = false, error = !tank.pEndOk, unit = "bar")
+                NumField(s.pressureStart, tank.pStart, { onChange(tank.copy(pStart = it.filter(Char::isDigit))) }, Modifier.weight(1f), decimal = false, error = !tank.pStartOk, unit = u.pressure.unit)
+                NumField(s.pressureEnd, tank.pEnd, { onChange(tank.copy(pEnd = it.filter(Char::isDigit))) }, Modifier.weight(1f), decimal = false, error = !tank.pEndOk, unit = u.pressure.unit)
             }
         }
     }
@@ -1683,8 +1731,8 @@ internal fun SharedDiveDialog(shared: SharedDive, onAdd: () -> Unit, onDismiss: 
                 Text(siteLine, style = MaterialTheme.typography.titleMedium)
                 Text(parseDate(shared.date)?.let(s::formatDate) ?: shared.date)
                 if (times.isNotEmpty()) Text(times)
-                shared.depth?.let { Text(s.labelled(s.depthLabel, "${formatNum(it)} m")) }
-                shared.tempC?.let { Text(s.labelled(s.waterTemp, "${formatNum(it)} °C")) }
+                shared.depth?.let { Text(s.labelled(s.depthLabel, LocalUnits.current.depth.text(it))) }
+                shared.tempC?.let { Text(s.labelled(s.waterTemp, LocalUnits.current.temperature.text(it))) }
             }
         },
         confirmButton = { Button(onClick = onAdd) { Text(s.sharedAdd) } },

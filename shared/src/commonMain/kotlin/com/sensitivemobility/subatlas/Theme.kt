@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -69,6 +70,9 @@ private val DarkColors = darkColorScheme(
 /** Seuils de vitesse de remontée en vigueur (réglages), lus par les courbes de plongée. */
 internal val LocalAscentScale = staticCompositionLocalOf { AscentScale() }
 
+/** Réglage « couleurs de remontée sur l'image à partager » : désactivé, la courbe de l'image reste d'une seule couleur. */
+internal val LocalShareAscentColors = staticCompositionLocalOf { false }
+
 /** Courbes affichées sur le graphique d'une plongée (réglage) et façon d'en activer ou d'en retirer une. */
 internal class ChartPrefs(val shown: Set<ChartSeries>, val toggle: (ChartSeries) -> Unit)
 
@@ -81,6 +85,8 @@ fun SubAtlasTheme(
     ascent: AscentScale = AscentScale(),
     chartSeries: Set<ChartSeries> = setOf(ChartSeries.PRESSURE),
     onToggleSeries: (ChartSeries) -> Unit = {},
+    shareAscentColors: Boolean = false,
+    units: UnitSystem = UnitSystem.METRIC,
     content: @Composable () -> Unit,
 ) {
     val dark = when (mode) {
@@ -92,6 +98,8 @@ fun SubAtlasTheme(
         CompositionLocalProvider(
             LocalStrings provides strings,
             LocalAscentScale provides ascent,
+            LocalShareAscentColors provides shareAscentColors,
+            LocalUnits provides remember(units) { Units(units) },
             LocalChartPrefs provides ChartPrefs(chartSeries, onToggleSeries),
             content = content,
         )

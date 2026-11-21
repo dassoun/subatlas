@@ -147,6 +147,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     // Position de défilement de chaque liste, conservée quand on ouvre une fiche puis qu'on revient.
     val homeScroll = rememberScrollState()
     val divesListState = rememberLazyListState()
+    // La plongée consultée depuis la liste : au retour, la liste se replace sur elle (même après des glissés vers d'autres plongées).
+    var divesFocus by remember { mutableStateOf<Long?>(null) }
     val sitesListState = rememberLazyListState()
     // Recherche de la liste des sites, conservée en ouvrant une fiche puis en revenant.
     var sitesQuery by remember { mutableStateOf("") }
@@ -167,6 +169,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     BackHandler(enabled = stack.size > 1) { pop() }
 
     val scope = rememberCoroutineScope()
+    // Détection et import des nouvelles plongées de l'ordinateur associé, tant que l'appli est ouverte.
+    val computerImport = remember { ComputerImport(state, actions, scope) { strings } }
     var pendingImport by remember { mutableStateOf<ImportData?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var sharedIncoming by remember { mutableStateOf<SharedDive?>(null) }
@@ -176,6 +180,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var incomingSiteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
     var incomingDeclined by remember { mutableStateOf<Set<String>>(emptySet()) }
     var incomingReading by remember { mutableStateOf(false) }
+    var incomingSites by remember { mutableStateOf<List<SharedSite>?>(null) }
 
     // Lien de plongée ouvert depuis un message (ou collé) : on propose de l'ajouter au carnet.
     val incoming = IncomingLink.pending
@@ -201,10 +206,28 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     incomingDiveFile = diveFile
                     return@launch
                 }
+                // Un export de sites (Réglages > Données > Exporter les sites) : on l'intègre comme avec le bouton d'import.
+                val sitesFile = withContext(Dispatchers.Default) {
+                    // Un fichier JSON (et non une base SQLite ou une archive ZIP) : seul le début est lu pour le reconnaître.
+                    val head = incomingFile.copyOfRange(0, minOf(incomingFile.size, 8)).decodeToString().removePrefix("﻿").trimStart()
+                    if (head.startsWith("{")) SitesExchange.decode(incomingFile.decodeToString().removePrefix("﻿")) else null
+                }
+                if (sitesFile != null) {
+                    // Rien n'est fait sans l'accord de l'utilisateur : une demande de confirmation s'affiche d'abord.
+                    incomingSites = sitesFile
+                    return@launch
+                }
                 try {
                     incomingReading = true
                     val file = try {
-                        withContext(Dispatchers.Default) { if (DivelogsImport.looksLikeZip(incomingFile)) DivelogsImport.parse(incomingFile) else ShearwaterImport.parse(incomingFile) }
+                        withContext(Dispatchers.Default) {
+                            when {
+                                // Reconnu à son contenu : un fichier XML UDDF, une archive ZIP (Dive Logs Data) ou une base SQLite (Shearwater).
+                                UddfImport.looksLikeUddf(incomingFile) -> UddfImport.parse(incomingFile)
+                                DivelogsImport.looksLikeZip(incomingFile) -> DivelogsImport.parse(incomingFile)
+                                else -> ShearwaterImport.parse(incomingFile)
+                            }
+                        }
                     } finally {
                         incomingReading = false
                     }
@@ -223,6 +246,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     notice = strings.shearwaterInvalid
                 } catch (e: DivelogsImport.NotDivelogsException) {
                     notice = strings.divelogsInvalid
+                } catch (e: UddfImport.NotUddfException) {
+                    notice = strings.uddfInvalid
                 } catch (e: Exception) {
                     notice = strings.importFailed(e.message ?: strings.unknownError)
                 }
@@ -234,6 +259,16 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
         val name = "subatlas-" + Clock.System.now().toString().take(10) + ".json"
         notice = try {
             if (actions.saveTextFile(name, state.exportJson())) strings.dataExported else null
+        } catch (e: Exception) {
+            strings.exportFailed(e.message ?: strings.unknownError)
+        }
+    }
+
+    fun startExportUddf() = scope.launch {
+        val name = "subatlas-" + Clock.System.now().toString().take(10) + ".uddf"
+        notice = try {
+            val xml = withContext(Dispatchers.Default) { UddfExport.encode(state.dives.toList(), state.sites.toList(), Clock.System.now().toString()) }
+            if (actions.saveTextFile(name, xml)) strings.uddfExported else null
         } catch (e: Exception) {
             strings.exportFailed(e.message ?: strings.unknownError)
         }
@@ -276,10 +311,14 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
 
     SubAtlasTheme(
         state.settings.theme, strings, state.settings.ascent, state.settings.chartSeries,
+        shareAscentColors = state.settings.shareAscentColors,
+        units = state.settings.units,
         onToggleSeries = { series ->
             state.updateSettings { it.copy(chartSeries = if (series in it.chartSeries) it.chartSeries - series else it.chartSeries + series) }
         },
     ) {
+        ComputerWatcher(state, actions, computerImport)
+        ComputerImportDialog(computerImport)
         ScreenTransition(current, stack.size, animated = current !is Screen.SitesMap) {
         when (current) {
             Screen.Home, Screen.Dives, Screen.Sites, Screen.Centers, Screen.Checklists, Screen.Safety, Screen.Settings -> Scaffold(
@@ -371,6 +410,8 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                             onShared = { sharedIncoming = it },
                             actions = actions,
                             listState = divesListState,
+                            focusId = divesFocus,
+                            onFocused = { divesFocus = null },
                         )
                     Screen.Sites ->
                         SiteList(
@@ -389,7 +430,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
                     Screen.Safety -> SafetyList(pad, actions, onOpen = { push(Screen.SafetyDetail(it)) })
-                    else -> SettingsScreen(state, actions, pad, onExport = ::startExport, onImport = ::startImport, onExportSites = ::startExportSites, onImportSites = ::startImportSites)
+                    else -> SettingsScreen(state, actions, computerImport, pad, onExport = ::startExport, onImport = ::startImport, onExportSites = ::startExportSites, onImportSites = ::startImportSites, onExportUddf = ::startExportUddf)
                 }
             }
 
@@ -398,6 +439,15 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                 val diveSite = dive?.let { state.site(it.siteId) }
                 val diveIds = state.dives.sortedWith(diveOrder).map { it.id } // plus récente d'abord
                 val di = diveIds.indexOf(current.id)
+                // Ouverte depuis la liste : on y revient sur la plongée en cours, pas sur celle d'où l'on est parti.
+                LaunchedEffect(current.id) { if (stack.getOrNull(stack.lastIndex - 1) == Screen.Dives) divesFocus = current.id }
+                // Le contenu lourd (carte, courbe) n'est recomposé qu'à l'image suivante : l'en-tête et le glissé restent fluides.
+                var bodyId by remember { mutableStateOf(current.id) }
+                LaunchedEffect(current.id) {
+                    withFrameNanos { }
+                    bodyId = current.id
+                }
+                val body = state.dive(bodyId) ?: dive
                 // Glissé à droite : plongée suivante (plus récente) ; à gauche : précédente (plus ancienne).
                 if (dive == null) pop() else Scaffold(
                     modifier = Modifier.swipeNeighbours(
@@ -406,13 +456,15 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     ),
                     topBar = { Bar(strings.dateText(dive.date), ::pop, leading = "#${state.diveNumber(dive.id)}", trailing = dive.startTime) },
                 ) { pad ->
-                    DiveDetailView(
-                        dive, state, pad, actions,
-                        onEdit = { push(Screen.DiveForm(dive.id, null)) },
-                        onDelete = { state.deleteDive(dive.id); pop() },
-                        onOpenSite = { push(Screen.SiteDetail(it)) },
-                        onOpenProcedure = { push(Screen.SafetyDetail(SAFETY_FAST_ASCENT)) },
-                    )
+                    key(body?.id) {
+                        if (body != null) DiveDetailView(
+                            body, state, pad, actions,
+                            onEdit = { push(Screen.DiveForm(body.id, null)) },
+                            onDelete = { state.deleteDive(body.id); pop() },
+                            onOpenSite = { push(Screen.SiteDetail(it)) },
+                            onOpenProcedure = { push(Screen.SafetyDetail(SAFETY_FAST_ASCENT)) },
+                        )
+                    }
                 }
             }
 
@@ -541,6 +593,22 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
         }
 
         if (incomingReading) ReadingDialog()
+        incomingSites?.let { list ->
+            AlertDialog(
+                onDismissRequest = { incomingSites = null },
+                title = { Text(strings.importSites) },
+                text = { Text(strings.sitesIncomingAsk(list.size, list.count { it.lat != null && it.lon != null })) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val r = state.importSites(list)
+                        incomingSites = null
+                        goTab(Screen.Sites)
+                        notice = strings.sitesImported(r.added, r.updated, r.unchanged, r.ignored)
+                    }) { Text(strings.shearwaterConfirm) }
+                },
+                dismissButton = { TextButton(onClick = { incomingSites = null }) { Text(strings.cancel) } },
+            )
+        }
         incomingPlan?.let { items ->
             ShearwaterPlanDialog(
                 items,
@@ -648,11 +716,13 @@ private fun ImportDialog(data: ImportData, onMerge: () -> Unit, onReplace: () ->
 private fun SettingsScreen(
     state: AppState,
     actions: PlatformActions,
+    computerImport: ComputerImport,
     pad: PaddingValues,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onExportSites: () -> Unit,
     onImportSites: () -> Unit,
+    onExportUddf: () -> Unit,
 ) {
     val s = LocalStrings.current
     val scroll = rememberScrollState()
@@ -693,6 +763,13 @@ private fun SettingsScreen(
             },
         ) { choice -> state.updateSettings { it.copy(theme = choice) } }
 
+        SectionTitle(s.unitsSection)
+        ChoiceChips(
+            UnitSystem.entries, state.settings.units,
+            label = { if (it == UnitSystem.METRIC) s.unitsMetric else s.unitsImperial },
+        ) { choice -> state.updateSettings { it.copy(units = choice) } }
+        Text(s.unitsHint, style = MaterialTheme.typography.bodySmall)
+
         SectionTitle(s.languageSection)
         ChoiceChips(
             AppLanguage.entries, state.settings.language,
@@ -725,7 +802,7 @@ private fun SettingsScreen(
                 Text(s.ascentLevel(i + 1), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = { set { a -> a.removed(i) } }) { Text(s.ascentRemove, color = MaterialTheme.colorScheme.error) }
             }
-            Stepper(s.ascentLimit(level.above), { set { a -> a.stepped(i, -1) } }, { set { a -> a.stepped(i, +1) } })
+            Stepper(s.ascentLimit(LocalUnits.current.rate.text(level.above.toDouble())), { set { a -> a.stepped(i, -1) } }, { set { a -> a.stepped(i, +1) } })
             ColorChoice(ASCENT_PALETTE, level.color, null) { c -> set { a -> a.recolored(i, c) } }
         }
         if (ascent.levels.isEmpty()) Text(s.ascentNone, style = MaterialTheme.typography.bodyMedium)
@@ -741,9 +818,12 @@ private fun SettingsScreen(
         Text(s.sitesHint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = onExportSites, modifier = Modifier.fillMaxWidth()) { Text(s.exportSites) }
         OutlinedButton(onClick = onImportSites, modifier = Modifier.fillMaxWidth()) { Text(s.importSites) }
+        Text(s.uddfHint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        OutlinedButton(onClick = onExportUddf, modifier = Modifier.fillMaxWidth()) { Text(s.exportUddf) }
         // Imports depuis d'autres applications : regroupés sous leur propre intitulé.
         Text(s.importFromApps, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
         DiveImportButtons(state, actions)
+        ComputersSection(state, actions, computerImport)
 
         // Section repliée par défaut : les actions dangereuses ne sont pas à portée d'un appui distrait.
         var confirmDelete by remember { mutableStateOf(false) }
@@ -759,6 +839,16 @@ private fun SettingsScreen(
             Pictogram(if (advanced) Picto.CHEVRON_UP else Picto.CHEVRON_DOWN, size = 22.dp, tint = MaterialTheme.colorScheme.primary)
         }
         if (advanced) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.shareAscentColors, style = MaterialTheme.typography.bodyLarge)
+                    Text(s.shareAscentColorsHint, style = MaterialTheme.typography.bodySmall)
+                }
+                androidx.compose.material3.Switch(
+                    checked = state.settings.shareAscentColors,
+                    onCheckedChange = { on -> state.updateSettings { it.copy(shareAscentColors = on) } },
+                )
+            }
             // 7 appuis rapprochés sur ce libellé : déverrouille les fonctions réservées au développement.
             Text(
                 s.deleteAllDivesHint,
@@ -1082,7 +1172,7 @@ private fun SiteList(
                         Text(
                             listOfNotNull(
                                 s.access(site.access),
-                                site.maxDepthMeters?.let { s.maxDepthShort(it) },
+                                site.maxDepthMeters?.let { s.maxDepthShort(LocalUnits.current.depth.text(it.toDouble())) },
                                 if (diveCount > 0) s.diveCount(diveCount) else null,
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
@@ -1128,7 +1218,7 @@ private fun SiteDetailView(
         SiteLine(DiveSite(id = site.id, name = site.name, type = site.type), MaterialTheme.typography.headlineSmall)
         Text(if (lat != null && lon != null) s.position(formatCoords(lat, lon)) else s.positionNotSet)
         Text(s.accessLine(site.access))
-        site.maxDepthMeters?.let { Text(s.maxDepthLine(it)) }
+        site.maxDepthMeters?.let { Text(s.maxDepthLine(LocalUnits.current.depth.text(it.toDouble()))) }
         if (site.notes.isNotBlank()) Text(s.notesLine(site.notes))
         Button(onClick = onAddDive, modifier = Modifier.fillMaxWidth()) { Text(s.addDiveHere) }
         if (lat != null && lon != null) {
@@ -1176,7 +1266,8 @@ private fun SiteForm(
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var lat by remember { mutableStateOf(existing?.latitude?.toString() ?: "") }
     var lon by remember { mutableStateOf(existing?.longitude?.toString() ?: "") }
-    var depth by remember { mutableStateOf(existing?.maxDepthMeters?.toString() ?: "") }
+    val units = LocalUnits.current
+    var depth by remember { mutableStateOf(units.depth.input(existing?.maxDepthMeters?.toDouble())) }
     var access by remember { mutableStateOf(existing?.access ?: SiteAccess.SHORE) }
     var notes by remember { mutableStateOf(existing?.notes ?: "") }
     var country by remember { mutableStateOf(existing?.country ?: "") }
@@ -1221,7 +1312,7 @@ private fun SiteForm(
         ) { PictoText(s.findCoords, Picto.SEARCH) }
         Text(s.positionOptionalHint, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
-            depth, { depth = it.filter(Char::isDigit) }, label = { Text(s.maxDepthField) }, singleLine = true,
+            depth, { depth = it.filter { c -> c.isDigit() || c == '.' || c == ',' } }, label = { Text("${s.maxDepthField} (${units.depth.unit})") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -1243,7 +1334,7 @@ private fun SiteForm(
                         name = name.trim(),
                         latitude = if (noCoords) null else latVal,
                         longitude = if (noCoords) null else lonVal,
-                        maxDepthMeters = depth.toIntOrNull(),
+                        maxDepthMeters = units.depth.fromInput(depth, existing?.maxDepthMeters?.toDouble())?.let { kotlin.math.round(it).toInt() },
                         access = access,
                         notes = notes.trim(),
                         country = country.trim(),

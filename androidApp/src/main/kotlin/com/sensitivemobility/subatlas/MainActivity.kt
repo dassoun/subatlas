@@ -28,6 +28,13 @@ class MainActivity : ComponentActivity() {
             pendingPermission?.complete(granted)
         }
 
+    private var pendingBlePermissions: CompletableDeferred<Boolean>? = null
+
+    private val blePermissionsLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            pendingBlePermissions?.complete(result.isNotEmpty() && result.values.all { it })
+        }
+
     private var pendingContactsPermission: CompletableDeferred<Boolean>? = null
 
     private val contactsPermissionLauncher =
@@ -48,6 +55,9 @@ class MainActivity : ComponentActivity() {
 
     private val saveLauncher =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { pendingSave?.complete(it) }
+    // Un fichier UDDF : type générique, pour que le système ne lui ajoute pas l'extension « .json » ou « .xml ».
+    private val saveBinaryLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { pendingSave?.complete(it) }
     private val openLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { pendingOpen?.complete(it) }
 
@@ -71,7 +81,7 @@ class MainActivity : ComponentActivity() {
         val actions = AndroidPlatformActions(
             this,
             pickSaveUri = { name ->
-                CompletableDeferred<Uri?>().also { pendingSave = it; saveLauncher.launch(name) }.await()
+                CompletableDeferred<Uri?>().also { pendingSave = it; if (name.endsWith(".uddf")) saveBinaryLauncher.launch(name) else saveLauncher.launch(name) }.await()
             },
             pickOpenUri = {
                 CompletableDeferred<Uri?>().also { pendingOpen = it; openLauncher.launch(arrayOf("*/*")) }.await()
@@ -86,6 +96,12 @@ class MainActivity : ComponentActivity() {
                 CompletableDeferred<Boolean>().also {
                     pendingDelete = it
                     deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }.await()
+            },
+            requestBlePermissions = {
+                CompletableDeferred<Boolean>().also {
+                    pendingBlePermissions = it
+                    blePermissionsLauncher.launch(blePermissions())
                 }.await()
             },
         )

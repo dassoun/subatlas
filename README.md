@@ -122,7 +122,7 @@ empreinte SHA-1 de la clé de signature : celle de debug, puis celle de release 
 Android » seule.
 
 ## Import depuis Shearwater Cloud
-L'écran « Plongées » propose « Importer depuis Shearwater » : on choisit un export Shearwater Cloud (fichier `.db`, SQLite).
+Réglages > Données > « Importer depuis d'autres applications » propose « Importer depuis Shearwater » : on choisit un export Shearwater Cloud (fichier `.db`, SQLite).
 SubAtlas le lit lui-même (lecteur SQLite et décompression gzip en Kotlin pur dans `SqliteReader.kt` et `Inflate.kt`, donc
 identiques sur Android et iOS) :
 - `dive_details` : date et heure, site, pays, profondeur max et moyenne, durée, température, lestage, combinaison, notes,
@@ -137,8 +137,10 @@ La courbe s'affiche dans la fiche de la plongée (un appui ou un glissement donn
 Limites connues : la sélection du fichier n'est pas encore implémentée sur iOS (comme l'export des données) ; seul le
 capteur de la bouteille 1 alimente la courbe de pression ; les exports en unités impériales n'ont pas été testés.
 
+- **Fichier reçu** : un export de sites (`subatlas-sites-<date>.json`) partagé avec l'appli (« Partager > SubAtlas ») ou ouvert avec elle (« Ouvrir avec ») est reconnu à son contenu (`"format": "subatlas-sites"`). Rien n'est fait sans confirmation : une boîte de dialogue annonce le nombre de sites (dont ceux qui sont localisés), puis « Importer » les intègre comme le bouton « Importer des sites » (récapitulatif, puis onglet Sites). Tout fichier reçu (plongée, sites, Shearwater, Dive Logs Data, UDDF) demande ainsi une confirmation avant de modifier le carnet.
+
 ## Import Dive Logs Data (divelogs.de)
-Le bouton « Importer Dive Logs Data » de l'écran « Plongées » lit un export `.DLD` : une archive ZIP (lue par `ZipReader`, en Kotlin
+Le bouton « Importer Dive Logs Data » (Réglages > Données) lit un export `.DLD` : une archive ZIP (lue par `ZipReader`, en Kotlin
 pur, comme le gzip de Shearwater) qui contient un fichier XML par plongée (`DivelogsImport.kt`). Chaque plongée est convertie en
 `ShearwaterDive` (marquée `fromDivelogs`) : l'**aperçu** (nouvelles / à fusionner, sites au nom proche rattachables un à un), la
 **fusion** et l'application sont ceux de l'import Shearwater, et un fichier envoyé à l'appli (« Partager » / « Ouvrir avec ») est
@@ -154,7 +156,136 @@ reconnu à son en-tête ZIP.
   Divelogs). Réimporter le même fichier ne refait rien (`divelogs:<identifiant>`).
 - Essayé sur un export de 189 plongées : 188 fusionnées et 1 nouvelle (la plongée du 30 octobre 2025 n'a pas d'équivalent à moins
   d'une heure dans le carnet).
-- **Position des sites** : le fichier donne la position GPS du site de chaque plongée ; un site du carnet encore sans position la reçoit\n  (et son pays s'il n'en a pas) quand une de ses plongées est fusionnée ; un site déjà localisé n'est pas modifié. Un site créé par\n  l'import reçoit aussi cette position.\n- Limites : la météo, le bateau et la température de l'air du fichier ne sont pas gardés (pas de champ dans le carnet).
+- **Position des sites** : le fichier donne la position GPS du site de chaque plongée ; un site du carnet encore sans position la reçoit
+  (et son pays s'il n'en a pas) quand une de ses plongées est fusionnée ; un site déjà localisé n'est pas modifié. Un site créé par
+  l'import reçoit aussi cette position.
+- Limites : la météo, le bateau et la température de l'air du fichier ne sont pas gardés (pas de champ dans le carnet).
+
+## Export et import UDDF
+UDDF (*Universal Dive Data Format*, uddf.org) est le format XML d'échange des carnets de plongée : Subsurface, MacDive, divelogs.de,
+Shearwater Cloud et la plupart des autres le lisent et l'écrivent. Unités du standard (SI) : profondeurs en m, durées en s,
+températures en **kelvins**, pressions en **pascals**, volumes de bouteille en **m³**, mélanges en fractions de 0 à 1.
+- **Exporter** : Réglages > Données > « Exporter au format UDDF » écrit `subatlas-<date>.uddf` (`UddfExport.kt`) : sites (nom,
+  pays, position, notes), mélanges de gaz, binômes, ordinateurs, et pour chaque plongée la date et l'heure, le site, les bouteilles
+  (volume, pressions, mélange), le lestage, la courbe (profondeur, température, pression de la bouteille 1), les profondeurs max et
+  moyenne, la durée, la température minimale, la visibilité et les notes. Les plongées sont groupées par jour (`repetitiongroup`).
+  Non écrits, faute d'équivalent dans le standard : photos, type de plongée, combinaison, palanquée, LND, paliers, PPO2 et CNS.
+  Les points de courbe tiennent sur une ligne (un carnet de 199 plongées fait environ 10 Mo).
+- **Importer** : Réglages > Données > « Importer un fichier UDDF », ou un fichier UDDF envoyé à l'appli (« Partager > SubAtlas » /
+  « Ouvrir avec ») : il est reconnu à son contenu (déclaration XML puis balise `<uddf`), pas à son extension. Le lecteur XML
+  (`Xml.kt`) est écrit en Kotlin pur, donc identique sur Android et iOS ; `UddfImport.kt` convertit chaque plongée en
+  `ShearwaterDive` (marquée `fromUddf`) : **aperçu**, rattachement des sites au nom proche et **fusion** sont ceux de l'import
+  Dive Logs Data (rien d'écrasé, courbe et ordinateur déjà importés conservés, position GPS du site complétée) et une
+  confirmation est demandée avant d'agir.
+- **Tolérance** : les logiciels s'écartent souvent du standard, donc une valeur qui n'a pas la bonne grandeur est reconnue
+  (température de moins de 200 : déjà en °C ; pression de moins de 1000 : déjà en bar ; volume d'un ou plus : déjà en litres ;
+  fraction de gaz supérieure à 1 : déjà en %). Un 0 veut dire « non renseigné ». Les dates `<datetime>` ISO et l'ancien codage
+  `<date><year>…` sont lus, le pays vient de `<address><country>` ou de `<location>` (« France Toulon », usage de divelogs.de).
+  Un journal de moins de douze points (plongée saisie à la main) ne donne pas de courbe.
+- **Position des sites** : même pour une plongée déjà importée (rien d'autre n'est refait), le site du carnet encore sans position
+  reçoit celle du fichier, à condition que son nom soit proche de celui du fichier (pour ne pas donner la position d'un autre
+  lieu à un site rattaché à la main). Sur l'émulateur, le fichier divelogs a fait passer les sites localisés de 4 à 48 sur 62.
+- **Doublons** : un fichier UDDF de divelogs.de nomme ses plongées `dive_<numéro>` ; SubAtlas en reprend la clé
+  `divelogs:<numéro>` : une plongée déjà importée du fichier `.DLD` n'est pas refaite. Les autres sources donnent `uddf:<identifiant>`.
+- **Vérifié** (émulateur) : un export de divelogs.de de 91 plongées (89 retrouvées comme déjà importées du `.DLD`) ; sur un carnet
+  vide, 91 plongées, 45 sites et 43 courbes créés ; aller-retour d'un carnet de 199 plongées (courbes, bouteilles, températures,
+  notes et sites identiques). Non essayé : fichiers de Subsurface ou MacDive, et iPhone (non compilé).
+
+## Téléchargement Bluetooth d'un Shearwater (Android)
+Réglages > Données > « Importer d'un Shearwater en Bluetooth » (`ShearwaterBleDialog.kt`) : recherche des appareils Bluetooth LE, connexion,
+sommaire des plongées de l'ordinateur (date, durée, profondeur max). Celles qui sont **déjà dans le carnet** sont marquées (clé
+`shearwater-ble:<série>:<heure>`, ou plongée déjà importée de Shearwater Cloud le même jour, à moins d'une heure, à 0,3 m de
+profondeur max près) ; les **nouvelles sont cochées**. « Télécharger N plongées » les lit (environ 40 s chacune, écran gardé allumé,
+progression et bouton Arrêter), puis elles passent par l'**aperçu d'import habituel** (nouvelles / à fusionner, sites rattachables,
+confirmation) : une plongée du carnet à la même date et à moins d'une heure est complétée sans rien écraser (la courbe déjà importée est
+gardée), sinon une nouvelle plongée est créée, sans site (l'ordinateur ne connaît ni le site, ni les notes, ni le binôme).
+Les relevés bruts sont enregistrés dans `files/ble/` (`manifest.bin`, `dive-<empreinte>.bin`) et un journal visible, partageable, décrit
+chaque échange.
+- `ShearwaterBleImport.kt` : une plongée téléchargée devient un `ShearwaterDive` (marquée `fromDevice`) : date et heure du sommaire (horloge de
+  l'ordinateur), durée, profondeur max, moyenne et température calculées sur les échantillons immergés, mélange respiré (octets 8 et 9 de
+  chaque échantillon) avec pression de début et de fin si l'émetteur était allumé, courbe complète par le décodeur « PNF » de l'import
+  Shearwater Cloud, ordinateur « Peregrine TX (977D8B42) ».
+- `Ble.kt` : interfaces `BleTransport` / `BleConnection` (commun), `AndroidBle.kt` : recherche, connexion GATT, service « série » de
+  Shearwater (`fe25c237-0ece-443c-b0aa-e02033e7029d`, sinon le premier service qui notifie et accepte des écritures), notifications,
+  écritures de 20 octets ; permissions Bluetooth demandées à l'exécution (`BLUETOOTH_SCAN`/`CONNECT`).
+- `ShearwaterBle.kt` (Kotlin pur) : le protocole de libdivecomputer : paquets SLIP, trames de 2 octets, lectures d'identifiants (`0x22`),
+  téléchargement (`0x35`/`0x36`/`0x37`), décompression (plages de zéros sur 9 bits, XOR par 32 octets), sommaire à `0xE0000000`.
+- **Vérifié sur un Peregrine TX (firmware V104 Classic, Android)** : connexion, identité, sommaire de 48 plongées (heure de début et de fin,
+  durée, profondeur max, numéro de journal, adresses) et téléchargement complet d'une plongée (27 776 octets décompressés, 731
+  échantillons de 5 s) : profondeurs identiques, échantillon par échantillon, à celles importées depuis Shearwater Cloud.
+- **Ce que l'essai a appris** : (1) il faut demander une **MTU** plus grande juste après la connexion (`requestMtu(517)`, l'appareil
+  accorde 80) : l'appareil envoie des notifications plus longues que les 20 octets de la MTU par défaut, que le téléphone tronque, et
+  les réponses de plus d'une trame n'arrivent alors jamais ; (2) les adresses du sommaire se comptent depuis la base lue en `0x8021`
+  (`0x80000000` pour le format natif) ; (3) l'en-tête de trame `[nombre, rang]` ne sert pas à reconstituer le paquet, la fin se
+  reconnaît à l'octet `0xC0` ; (4) le débit est faible (environ 700 octets décompressés par seconde : une plongée d'une heure demande
+  une quarantaine de secondes), donc on ne lit que les plongées nouvelles.
+- **Sommaire** : 48 entrées de 32 octets : `A5C4` (présente), heure de début (+4) et de fin (+8) en secondes depuis 1970 à l'heure de
+  l'ordinateur, durée en secondes (+12), profondeur max en dm (+16), numéro de journal (+18), adresses de début (+20) et de fin (+24).
+- **Vérifié sur un Peregrine TX (V104 Classic)** : la plongée convertie donne les mêmes valeurs que Shearwater Cloud (heures, 3620 s, max
+  13,9 m, moyenne 9,7 m, 26,8 °C, air, 212 à 49 bar, 726 points identiques) ; la fusion avec la plongée du carnet n'a rien écrasé.
+  La création d'une plongée nouvelle n'a été essayée que sur l'émulateur.
+- **Une bouteille par gaz** : la bouteille principale est le premier gaz respiré (avec ses pressions si l'émetteur était allumé) ; chaque
+  autre mélange respiré (au moins 10 s, pour écarter un parasite) devient une bouteille sans pression, avec sa durée d'utilisation et sa
+  profondeur moyenne ; chaque gaz **configuré** dans l'ordinateur mais non respiré (liste de pourcentages d'O2 à partir de l'octet 20 de
+  l'enregistrement d'ouverture, cohérente avec les gaz respirés sur les 103 plongées de l'export Cloud) a aussi la sienne, sans usage
+  (son hélium n'est pas connu : 0). Un pony ou un bloc du même gaz, sans émetteur ni configuration, est invisible pour l'ordinateur : il
+  reste à saisir. La fusion avec une plongée du carnet associe les bouteilles **par gaz** (et non par rang) : une plongée saisie à la main
+  avec ses bouteilles dans un autre ordre garde chaque volume ; la bouteille manquante est ajoutée. Une plongée déjà fusionnée de deux
+  sources n'est pas modifiée. Le décodeur a été essayé sur les 103 plongées de l'export Shearwater Cloud (dont 5 à plusieurs gaz) :
+  profondeurs max et moyenne (moyenne des échantillons non nuls, comme Shearwater), température et longueur de courbe identiques ; le
+  24 avril 2026 Cloud attribue le 60 % à la bouteille équipée de l'émetteur, le décodeur Bluetooth l'air (la pression 2840 à 678 psi est
+  celle d'une bouteille d'air). Le 30 avril 2026 à 10:00 n'a qu'un gaz configuré (l'air) : le pony y est dans les notes seulement.
+- **Coupure** : la barre de progression et l'erreur sont affichées en haut de la fenêtre. Un silence de l'ordinateur de plus de 10 s ou une
+  déconnexion signalée par le téléphone (appareil éloigné, éteint, Bluetooth coupé) donne un message en clair (« appareil hors de portée
+  ou éteint », « l'ordinateur ne répond plus ») ; les plongées déjà lues restent importables (« Importer les N lues »). **Pas de reprise
+  automatique** : le Peregrine cesse de transmettre dès que la liaison est coupée (il affiche « log error : time out »), « Recommencer »
+  repart d'une connexion neuve. Essayé en vrai : Bluetooth du téléphone coupé pendant le téléchargement, et Peregrine éloigné.
+- iPhone : pas de couche Bluetooth (non compilé).
+
+## Unités métriques ou impériales
+Réglages > Unités : **métrique** (m, °C, bar, L, kg, par défaut) ou **impérial** (ft, °F, psi, cuft, lb). Seul l'affichage et la saisie
+changent : les données restent enregistrées en métrique (`Units.kt`, lu par tous les écrans par `LocalUnits`).
+- **Affiché** : profondeurs (max, moyenne, par bouteille, de site, visibilité), température, pression des bouteilles, volume de
+  bouteille, gaz consommé, SAC, lestage, vitesse de remontée (seuils des réglages, infobulle et bilan du graphique), distance aux sites,
+  tableau de bord, carte de partage, import. Les graduations du graphique tombent sur des valeurs rondes de l'unité (5 m ou 10 ft ; 50 bar
+  ou 500 psi).
+- **Saisie** : les formulaires de plongée et de site s'ouvrent et se lisent en unités affichées, puis sont convertis en métrique à
+  l'enregistrement. Un champ non modifié rend la valeur d'origine : ouvrir puis enregistrer une plongée ne déforme rien (vérifié).
+- **Volume de bouteille en cuft** : le litre est un volume d'eau, le pied cube un volume de gaz à la pression de service ; la conversion
+  suit la convention de 3000 psi (11,1 L = 80 cuft). Le gaz consommé et le SAC (gaz libre : 1 L = 0,0353 cuft) n'ont pas cette ambiguïté.
+- **Non converti** : le texte de la page Sécurité (remontée rapide à 15 m/min), l'épaisseur de combinaison (mm), la pression partielle
+  d'oxygène (bar).
+- **Import** : les exports Shearwater en unités impériales sont convertis à la lecture (déjà géré) ; non essayé sur un vrai fichier.
+
+## Association d'un ordinateur de plongée (Android)
+Réglages > « Importer depuis un ordinateur de plongée » > **Peregrine** (`ComputerSettings.kt`, parcours voulu dans
+`docs/import-ordinateur-plongee.md`) :
+- **Associer un ordinateur de plongée** : la recherche Bluetooth démarre à l'ouverture de la fenêtre (le Peregrine doit avoir son Bluetooth
+  activé, Shearwater Cloud fermé) ; on touche le Peregrine dans la liste (seuls les appareils nommés « Peregrine » sont montrés, avec un
+  lien « Afficher tous les appareils Bluetooth »). L'appli s'y connecte pour lire son numéro de série, son modèle et son firmware (preuve
+  que c'est un ordinateur Shearwater) puis **enregistre l'association** dans les réglages : `Settings.computers` (`DiveComputer` : adresse
+  Bluetooth, nom, modèle, série, firmware, famille de protocole). La section affiche alors « Peregrine TX (977D8B42) · V104 Classic ».
+- **Dissocier le Peregrine** (avec confirmation) : efface l'enregistrement ; les plongées déjà importées sont conservées.
+- Décision : la détection et l'import automatiques ne se feront **que lorsque SubAtlas est ouverte** (pas de service en arrière-plan).
+- **Détection (appli ouverte seulement)** : tant que SubAtlas est au premier plan et qu'un Peregrine est associé, l'appli guette son adresse
+  Bluetooth (`BleTransport.waitForDevice` : recherche filtrée sur l'adresse, mode équilibré, sans permission à redemander). Dès qu'il
+  apparaît, `ComputerImport` (`ComputerImport.kt`) se connecte, lit le sommaire et ne garde que les **nouvelles plongées** (celles qui ne
+  sont pas déjà dans le carnet). Il ne se redéclenche pas tant que l'ordinateur reste à portée : il faut qu'il disparaisse (Bluetooth
+  coupé sur l'ordinateur) plus de 15 s, ou qu'on revienne dans l'appli plus de 5 min après le dernier import. La détection se met en
+  pause pendant l'association et l'import manuel.
+- **Avec confirmation (par défaut)** : une fenêtre liste les nouvelles plongées (cochées), « Importer (N) » ou « Plus tard ». Aucune
+  nouvelle plongée : message de 3 s. La connexion **reste ouverte** pendant la confirmation : après l'envoi de la liste, le Peregrine
+  (« Liste envoyée ») attend les demandes de téléchargement sur cette connexion (une première version la fermait puis la rouvrait : le
+  téléchargement échouait). En cas d'échec, la fenêtre propose « Partager le journal » des échanges.
+- **Case « Importer automatiquement les nouvelles plongées »** (par ordinateur, `DiveComputer.autoImport`) : sans confirmation ; une jauge
+  et un message indiquent le traitement (« Connexion au Peregrine… », « Lecture de la liste… », « Plongée 2 sur 3 · 40 % », « Ajout des
+  plongées au carnet… ») puis le résultat (« 3 plongées ajoutées, 1 fusionnée »). Une coupure en route ajoute tout de même les plongées déjà
+  lues et affiche la cause ; les autres seront proposées la fois suivante.
+- **Importer les nouvelles plongées** : bouton de la section, même flux sans attendre la détection. Les plongées sont ajoutées par
+  l'import habituel (fusion avec une plongée du carnet à la même heure, sinon plongée nouvelle, sans site à renseigner ensuite).
+- **Vérifié** : sur ton Peregrine TX, l'association (recherche, identité, enregistrement ; le Peregrine annonce son service Bluetooth
+  Shearwater et son nom) ; sur l'émulateur, la section, la case, la fenêtre (connexion, erreur « ordinateur introuvable »), Dissocier.
+  **Non vérifié** : la détection et l'import complet depuis cet écran avec un vrai Peregrine.
 
 ## Photos de plongée
 - **Ajout** : « Ajouter des photos » (sous les notes de la fiche, ou la tuile « + » de la rangée de vignettes quand il y en a
@@ -241,6 +372,8 @@ messagerie, réseaux sociaux, enregistrement dans la galerie).
   (non implémenté).
 - Les textes de la carte suivent la langue de l'appli. Pas de carte du site dans l'image : elle dépendrait du réseau au moment
   de la capture.
+
+- **Couleurs de remontée** : la courbe de l'image reste d'une seule couleur (blanche). Réglages > Avancé > « Couleurs de remontée sur l'image à partager » les colore selon les seuils de vitesse de remontée ; désactivé par défaut (`Settings.shareAscentColors`).
 
 ## Courbe de plongée : plein écran et vitesse de remontée
 - Le bouton en haut à droite du profil l'affiche en plein écran, en paysage. Sur Android l'écran est verrouillé en paysage le

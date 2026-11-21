@@ -504,7 +504,7 @@ internal fun SitesMapScreen(
                         listOfNotNull(
                             if (dives > 0) s.diveCount(dives) else s.mapNoDive,
                             s.access(selected.access),
-                            selected.maxDepthMeters?.let { s.maxDepthShort(it) },
+                            selected.maxDepthMeters?.let { s.maxDepthShort(LocalUnits.current.depth.text(it.toDouble())) },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                     )

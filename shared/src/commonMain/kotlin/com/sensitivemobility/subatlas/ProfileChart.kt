@@ -102,6 +102,7 @@ internal fun ProfileChart(
     onOpenProcedure: (() -> Unit)? = null,
 ) {
     val s = LocalStrings.current
+    val u = LocalUnits.current
     val measurer = rememberTextMeasurer()
     val depthColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -137,8 +138,15 @@ internal fun ProfileChart(
     val showPpo2 = hasPpo2 && ChartSeries.PPO2 in prefs.shown
     val cnsMax = if (hasCns) max(5.0, ceil((profile.cnsPct.maxOrNull() ?: 0) / 5.0) * 5.0) else 5.0
     val ppo2Max = if (hasPpo2) max(160, ceil((profile.ppo2Cb.maxOrNull() ?: 0) / 20.0).toInt() * 20) / 100.0 else 1.6
-    val maxDepth = max(5.0, ceil((profile.depthDm.maxOrNull() ?: 0) / 10.0 / 5.0) * 5.0)
-    val maxPressure = if (hasPressure) ceil((profile.pressureBar.maxOrNull() ?: 0) / 50.0) * 50.0 else 0.0
+    // Axes : les graduations tombent sur des valeurs rondes de l'unité affichée (5 m ou 10 ft ; 50 bar ou 500 psi) ; le tracé reste en métrique.
+    val depthFactor = if (u.imperial) Units.FEET_PER_METER else 1.0
+    val depthStep = if (u.imperial) 10.0 else 5.0
+    val maxDepthShown = max(depthStep, ceil((profile.depthDm.maxOrNull() ?: 0) / 10.0 * depthFactor / depthStep) * depthStep)
+    val maxDepth = maxDepthShown / depthFactor
+    val pressureFactor = if (u.imperial) Units.PSI_PER_BAR else 1.0
+    val pressureStep = if (u.imperial) 500.0 else 50.0
+    val maxPressureShown = if (hasPressure) ceil((profile.pressureBar.maxOrNull() ?: 0) * pressureFactor / pressureStep) * pressureStep else 0.0
+    val maxPressure = maxPressureShown / pressureFactor
     val total = max(1, profile.durationSeconds)
 
     // Géométrie du tracé (en pixels), la même pour le dessin et pour la lecture du doigt.
@@ -227,7 +235,7 @@ internal fun ProfileChart(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("● " + s.profileDepthLegend, style = MaterialTheme.typography.labelSmall, color = depthColor)
+            Text("● ${s.profileDepthLegend} (${u.depth.unit})", style = MaterialTheme.typography.labelSmall, color = depthColor)
             @Composable
             fun seriesChip(series: ChartSeries, color: Color, label: String) {
                 FilterChip(
@@ -237,9 +245,9 @@ internal fun ProfileChart(
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = color.copy(alpha = 0.22f)),
                 )
             }
-            if (hasPressure) seriesChip(ChartSeries.PRESSURE, PressureColor, s.profilePressureLegend)
+            if (hasPressure) seriesChip(ChartSeries.PRESSURE, PressureColor, "${s.profilePressureLegend} (${u.pressure.unit})")
             if (hasNdl) seriesChip(ChartSeries.NDL, NdlColor, "${s.seriesNdl} (0–99 min)")
-            if (hasDeco) seriesChip(ChartSeries.DECO, DecoColor, "${s.seriesDeco} (m)")
+            if (hasDeco) seriesChip(ChartSeries.DECO, DecoColor, "${s.seriesDeco} (${u.depth.unit})")
             if (hasCns) seriesChip(ChartSeries.CNS, CnsColor, "${s.seriesCns} (0–${cnsMax.roundToInt()} %)")
             if (hasPpo2) seriesChip(ChartSeries.PPO2, Ppo2Color, "${s.seriesPpo2} (0–${formatNum(ppo2Max)} bar)")
         }
@@ -296,14 +304,14 @@ internal fun ProfileChart(
             fun x(i: Int) = p.left + p.width * (if (n <= 1) 0f else (i - viewStart) / viewSpan)
             fun yDepth(dm: Int) = p.top + p.height * (dm / 10f / maxDepth.toFloat())
 
-            // Grille : une ligne tous les 5 m, avec la profondeur à gauche.
+            // Grille : une ligne tous les 5 m (10 ft), avec la profondeur à gauche.
             var d = 0.0
-            while (d <= maxDepth + 0.01) {
-                val y = p.top + p.height * (d / maxDepth).toFloat()
+            while (d <= maxDepthShown + 0.01) {
+                val y = p.top + p.height * (d / maxDepthShown).toFloat()
                 drawLine(gridColor, Offset(p.left, y), Offset(p.left + p.width, y), strokeWidth = 1f)
                 val t = measurer.measure("${d.roundToInt()}", labelStyle)
                 drawText(t, topLeft = Offset(p.left - t.size.width - 4f * density, y - t.size.height / 2f))
-                d += 5.0
+                d += depthStep
             }
             // Repères de temps : au plus huit dans la fenêtre visible, en minutes (ou m:ss quand on zoome fort).
             val startSec = viewStart * profile.intervalSeconds
@@ -324,11 +332,11 @@ internal fun ProfileChart(
             // Pression : axe à droite.
             if (showPressure && maxPressure > 0) {
                 var pr = 0.0
-                while (pr <= maxPressure + 0.01) {
-                    val y = p.top + p.height * (1f - (pr / maxPressure).toFloat())
+                while (pr <= maxPressureShown + 0.01) {
+                    val y = p.top + p.height * (1f - (pr / maxPressureShown).toFloat())
                     val t = measurer.measure("${pr.roundToInt()}", labelStyle.copy(color = PressureColor))
                     drawText(t, topLeft = Offset(p.left + p.width + 4f * density, y - t.size.height / 2f))
-                    pr += 50.0
+                    pr += pressureStep
                 }
             }
             clipRect(p.left, 0f, p.left + p.width * reveal.value, size.height) {
@@ -411,15 +419,15 @@ internal fun ProfileChart(
             val rate = rates[i]
             val parts = listOfNotNull(
                 "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}",
-                "${formatNum(profile.depthDm[i] / 10.0)} m",
-                profile.tempDc.getOrNull(i)?.let { "${formatNum(it / 10.0)} °C" },
-                if (hasPressure) "${profile.pressureBar[i]} bar" else null,
+                u.depth.text(profile.depthDm[i] / 10.0),
+                profile.tempDc.getOrNull(i)?.let { u.temperature.text(it / 10.0) },
+                if (hasPressure) u.pressure.text(profile.pressureBar[i].toDouble()) else null,
                 if (showNdl && profile.depthDm[i] >= 3) "${s.seriesNdl} ${profile.ndlMin[i].let { if (it >= 99) "99+" else "$it" }} min" else null,
-                if (showDeco && profile.decoStopM[i] > 0) "${s.seriesDeco} ${profile.decoStopM[i]} m" +
+                if (showDeco && profile.decoStopM[i] > 0) "${s.seriesDeco} ${u.depth.text(profile.decoStopM[i].toDouble())}" +
                     (profile.ttsMin.getOrNull(i)?.let { " (${s.seriesTts} $it min)" } ?: "") else null,
                 if (showCns) "${s.seriesCns} ${profile.cnsPct[i]} %" else null,
                 if (showPpo2) "${s.seriesPpo2} ${formatNum(profile.ppo2Cb[i] / 100.0)} bar" else null,
-                if (abs(rate) >= 0.5) "${if (rate > 0) "↑" else "↓"} ${formatNum(round(abs(rate) * 10) / 10)} m/min" else null,
+                if (abs(rate) >= 0.5) "${if (rate > 0) "↑" else "↓"} ${u.rate.text(abs(rate))}" else null,
             )
             Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 4.dp))
         }
@@ -428,8 +436,8 @@ internal fun ProfileChart(
         if (maxRate > 0.5) {
             val color = scale.colorFor(maxRate) ?: StatusOk
             Text(
-                s.labelled(s.ascentRateLabel, "max ${formatNum(round(maxRate * 10) / 10)} m/min") +
-                    (if (lowestLimit == null) "" else " · " + if (secondsOver > 0) s.ascentOver(lowestLimit, secondsOver) else s.ascentFine),
+                s.labelled(s.ascentRateLabel, "max ${u.rate.text(maxRate)}") +
+                    (if (lowestLimit == null) "" else " · " + if (secondsOver > 0) s.ascentOver(u.rate.text(lowestLimit.toDouble()), secondsOver) else s.ascentFine),
                 style = MaterialTheme.typography.bodyMedium,
                 color = color,
                 modifier = Modifier.padding(start = 4.dp),
@@ -517,7 +525,11 @@ internal fun ProfileSparkline(profile: DiveProfile, modifier: Modifier = Modifie
         if (showDeco) {
             val forbidden = Path().apply {
                 moveTo(x(indices.first()), 0f)
-                for (i in indices) lineTo(x(i), (size.height - stroke) * (maxOf(profile.decoStopM[i], 0) / maxDepth) + stroke / 2)
+                // Hors décompression, le bord reste à la surface (y = 0) : un décalage d'un demi-trait y dessinerait un filet rouge sur toute la largeur.
+                for (i in indices) {
+                    val stop = profile.decoStopM[i]
+                    lineTo(x(i), if (stop > 0) (size.height - stroke) * (stop / maxDepth) + stroke / 2 else 0f)
+                }
                 lineTo(x(n - 1), 0f)
                 close()
             }
