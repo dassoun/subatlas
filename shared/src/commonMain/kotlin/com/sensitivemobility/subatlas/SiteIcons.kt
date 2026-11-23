@@ -127,6 +127,20 @@ internal fun DrawScope.drawSiteType(type: SiteType, tint: Color, w: Float, h: Fl
                 wave(w * 0.2f, w * 0.8f, h * 0.45f, h * 0.06f, tint, stroke)
                 wave(w * 0.2f, w * 0.8f, h * 0.63f, h * 0.06f, tint, stroke)
             }
+            SiteType.WRECK -> {
+                // Une coque posée de travers, son mât brisé, et une vague au-dessus.
+                val hull = Path().apply {
+                    moveTo(w * 0.06f, h * 0.5f)
+                    lineTo(w * 0.94f, h * 0.5f)
+                    lineTo(w * 0.78f, h * 0.82f)
+                    lineTo(w * 0.22f, h * 0.82f)
+                    close()
+                }
+                drawPath(hull, tint, style = stroke)
+                drawLine(tint, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.38f, h * 0.12f), stroke.width, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.38f, h * 0.12f), Offset(w * 0.62f, h * 0.2f), stroke.width, StrokeCap.Round)
+                wave(w * 0.04f, w * 0.96f, h * 0.95f, h * 0.04f, tint, stroke)
+            }
             SiteType.OTHER -> {
                 drawCircle(tint, w * 0.38f, Offset(w * 0.5f, h * 0.5f), style = stroke)
                 drawCircle(tint, w * 0.1f, Offset(w * 0.5f, h * 0.5f), style = Fill)

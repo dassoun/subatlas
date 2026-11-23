@@ -35,6 +35,15 @@ class SitesExchangeTest {
     }
 
     @Test
+    fun wreckTypeRoundTrips() {
+        val source = state()
+        source.saveSite(DiveSite(id = source.newId(), name = "Thistlegorm", latitude = 27.8, longitude = 33.9, type = SiteType.WRECK))
+        val target = state()
+        target.importSites(SitesExchange.decode(SitesExchange.encode(source.sites.toList(), "2026-11-23"))!!)
+        assertEquals(SiteType.WRECK, target.sites.single().type)
+    }
+
+    @Test
     fun siteWithoutPositionIsImported() {
         val target = state()
         val r = target.importSites(listOf(ExchangedSite(name = "Sans GPS", maxDepthMeters = 12)))

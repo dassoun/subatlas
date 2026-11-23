@@ -24,7 +24,7 @@ data class DiveSite(
 internal fun DiveSite.fullName(): String = if (country.isBlank()) name else "${countryText()} · $name"
 
 @Serializable
-enum class SiteType { SEA, LAKE, RIVER, QUARRY, PIT, CAVE, POOL, OTHER }
+enum class SiteType { SEA, LAKE, RIVER, QUARRY, PIT, CAVE, POOL, WRECK, OTHER }
 
 /** Structure commerciale avec laquelle on peut plonger (club, école, centre). */
 @Serializable

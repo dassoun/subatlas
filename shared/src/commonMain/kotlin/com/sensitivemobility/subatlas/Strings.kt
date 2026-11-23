@@ -631,6 +631,7 @@ object FrStrings : Strings {
         SiteType.PIT -> "Fosse"
         SiteType.CAVE -> "Grotte"
         SiteType.POOL -> "Piscine"
+        SiteType.WRECK -> "Épave"
         SiteType.OTHER -> "Autre"
     }
     override fun sortLabel(sort: DiveSort) = when (sort) {
@@ -1216,6 +1217,7 @@ object EnStrings : Strings {
         SiteType.PIT -> "Pit"
         SiteType.CAVE -> "Cave"
         SiteType.POOL -> "Pool"
+        SiteType.WRECK -> "Wreck"
         SiteType.OTHER -> "Other"
     }
     override fun sortLabel(sort: DiveSort) = when (sort) {
