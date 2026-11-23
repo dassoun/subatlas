@@ -181,7 +181,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var incomingSiteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
     var incomingDeclined by remember { mutableStateOf<Set<String>>(emptySet()) }
     var incomingReading by remember { mutableStateOf(false) }
-    var incomingSites by remember { mutableStateOf<List<SharedSite>?>(null) }
+    var incomingSites by remember { mutableStateOf<List<ExchangedSite>?>(null) }
 
     // Lien de plongée ouvert depuis un message (ou collé) : on propose de l'ajouter au carnet.
     val incoming = IncomingLink.pending

@@ -547,33 +547,50 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /**
-     * Intègre les sites d'un fichier d'une autre installation. Seuls comptent ceux qui ont une position : un site connu (même nom,
-     * ou nom très proche dans le même pays) mais sans position reçoit celle du fichier, un site inconnu est ajouté, un site
-     * déjà localisé n'est pas modifié. Les sites du fichier sans position sont ignorés.
+     * Intègre les sites d'un fichier d'une autre installation. Un site est reconnu à son identifiant (`uuid`), puis à son nom
+     * (même nom, ou nom très proche dans le même pays). Un site inconnu est ajouté avec tous ses champs ; un site connu ne
+     * reçoit que ce qui lui manque (position, pays, type, profondeur, notes) : une valeur déjà saisie n'est jamais écrasée.
+     * Seuls les sites sans nom sont ignorés.
      */
-    fun importSites(incoming: List<SharedSite>): SitesImportResult {
+    fun importSites(incoming: List<ExchangedSite>): SitesImportResult {
         var added = 0
         var updated = 0
         var unchanged = 0
         var ignored = 0
         for (s in incoming) {
-            val la = s.lat
-            val lo = s.lon
-            if (la == null || lo == null || s.name.isBlank()) { ignored++; continue }
-            val found = exactSite(s.name, s.country) ?: similarSiteFor(s.name, s.country, la, lo)
-            when {
-                found == null -> {
-                    saveSite(DiveSite(id = newId(), name = s.name, latitude = la, longitude = lo, country = s.country, type = s.type), persist = false)
-                    added++
-                }
-                found.latitude == null || found.longitude == null -> {
-                    saveSite(
-                        found.copy(latitude = la, longitude = lo, country = found.country.ifBlank { s.country }, type = found.type ?: s.type),
-                        persist = false,
-                    )
-                    updated++
-                }
-                else -> unchanged++
+            if (s.name.isBlank()) { ignored++; continue }
+            val found = s.uuid.takeIf { it.isNotBlank() }?.let { u -> sites.firstOrNull { it.uuid == u } }
+                ?: exactSite(s.name, s.country)
+                ?: similarSiteFor(s.name, s.country, s.lat, s.lon)
+            if (found == null) {
+                // L'identifiant du fichier n'est adopté que s'il n'existe pas déjà ici.
+                saveSite(
+                    DiveSite(
+                        id = newId(), name = s.name, latitude = s.lat, longitude = s.lon, country = s.country, type = s.type,
+                        maxDepthMeters = s.maxDepthMeters, access = s.access ?: SiteAccess.SHORE, notes = s.notes,
+                        uuid = s.uuid.takeIf { u -> u.isNotBlank() && sites.none { it.uuid == u } }.orEmpty(),
+                    ),
+                    persist = false,
+                )
+                added++
+                continue
+            }
+            val lat = s.lat
+            val lon = s.lon
+            val takePosition = (found.latitude == null || found.longitude == null) && lat != null && lon != null
+            val filled = found.copy(
+                latitude = if (takePosition) lat else found.latitude,
+                longitude = if (takePosition) lon else found.longitude,
+                country = found.country.ifBlank { s.country },
+                type = found.type ?: s.type,
+                maxDepthMeters = found.maxDepthMeters ?: s.maxDepthMeters,
+                notes = found.notes.ifBlank { s.notes },
+            )
+            if (filled == found) {
+                unchanged++
+            } else {
+                saveSite(filled, persist = false)
+                updated++
             }
         }
         if (added + updated > 0) saveSites()

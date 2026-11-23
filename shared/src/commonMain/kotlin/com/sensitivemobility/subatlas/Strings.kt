@@ -1007,13 +1007,13 @@ object FrStrings : Strings {
     override val importSites = "Importer des sites"
     override val sitesHint = "Les sites seuls, dans un fichier JSON à importer sur une autre installation : les sites localisés sont ajoutés, et un site déjà connu mais sans position reçoit celle du fichier."
     override val sitesExported = "Sites exportés."
-    override fun sitesIncomingAsk(total: Int, located: Int) = "Ce fichier est un export de sites SubAtlas : $total site${if (total > 1) "s" else ""}, dont $located avec position GPS. Les sites localisés seront ajoutés, et un site déjà connu mais sans position recevra celle du fichier. Importer ?"
+    override fun sitesIncomingAsk(total: Int, located: Int) = "Ce fichier est un export de sites SubAtlas : $total site${if (total > 1) "s" else ""}, dont $located avec position GPS. Les sites inconnus seront ajoutés ; un site déjà connu ne recevra que les informations qui lui manquent (position, profondeur, notes…), sans rien écraser. Importer ?"
     override val sitesImportInvalid = "Ce fichier n'est pas un export de sites de SubAtlas."
     override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
         "$added site${if (added > 1) "s" else ""} ajouté${if (added > 1) "s" else ""}",
-        "$updated position${if (updated > 1) "s" else ""} complétée${if (updated > 1) "s" else ""}",
+        "$updated site${if (updated > 1) "s" else ""} complété${if (updated > 1) "s" else ""}",
         "$unchanged déjà à jour",
-        "$ignored sans position (ignoré${if (ignored > 1) "s" else ""})",
+        "$ignored sans nom (ignoré${if (ignored > 1) "s" else ""})",
     ).joinToString("\n")
     override val importData = "Importer des données"
 
@@ -1591,13 +1591,13 @@ object EnStrings : Strings {
     override val importSites = "Import sites"
     override val sitesHint = "Sites only, in a JSON file to import into another installation: located sites are added, and a known site without a position gets the one from the file."
     override val sitesExported = "Sites exported."
-    override fun sitesIncomingAsk(total: Int, located: Int) = "This file is a SubAtlas sites export: $total site${if (total != 1) "s" else ""}, $located with a GPS position. Located sites will be added, and a known site without a position will get the one from the file. Import?"
+    override fun sitesIncomingAsk(total: Int, located: Int) = "This file is a SubAtlas sites export: $total site${if (total != 1) "s" else ""}, $located with a GPS position. Unknown sites will be added; a known site only gets the information it lacks (position, depth, notes…), nothing is overwritten. Import?"
     override val sitesImportInvalid = "This file is not a SubAtlas sites export."
     override fun sitesImported(added: Int, updated: Int, unchanged: Int, ignored: Int) = listOf(
         "$added site${if (added != 1) "s" else ""} added",
-        "$updated position${if (updated != 1) "s" else ""} filled in",
+        "$updated site${if (updated != 1) "s" else ""} completed",
         "$unchanged already up to date",
-        "$ignored without position (ignored)",
+        "$ignored without name (ignored)",
     ).joinToString("\n")
     override val importData = "Import data"
 

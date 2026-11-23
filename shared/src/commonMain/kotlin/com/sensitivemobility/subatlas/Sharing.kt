@@ -32,9 +32,12 @@ data class SharedDive(
     val profile: SharedProfile? = null,
 )
 
-/** Courbe partagée : intervalle entre deux points (s) et profondeurs en dm, en écarts successifs (zigzag + varint), en Base64. */
+/**
+ * Courbe partagée : intervalle entre deux points (s) et profondeurs en dm, en écarts successifs (zigzag + varint), en Base64.
+ * [t] : température en dixièmes de °C, codée de la même façon, un point par point de [d] ; absente sans mesure.
+ */
 @Serializable
-data class SharedProfile(val iv: Int, val d: String)
+data class SharedProfile(val iv: Int, val d: String, val t: String? = null)
 
 @Serializable
 data class SharedSite(
@@ -117,36 +120,40 @@ private const val SHARE_PROFILE_SECONDS = 10
 private const val SHARE_PROFILE_MAX_POINTS = 500
 
 /**
- * Courbe allégée pour le lien : un point toutes les ~10 s (jamais plus de 500), seule la profondeur est gardée. Les
- * écarts d'un point au suivant sont petits, donc codés sur un octet la plupart du temps (zigzag + varint).
+ * Courbe allégée pour le lien : un point toutes les ~10 s (jamais plus de 500), la profondeur et, si l'ordinateur l'a
+ * mesurée, la température. Les écarts d'un point au suivant sont petits, donc codés sur un octet la plupart du temps
+ * (zigzag + varint).
  */
 @OptIn(ExperimentalEncodingApi::class)
 internal fun DiveProfile.toShared(): SharedProfile? {
     val n = depthDm.size
     if (n < 2 || intervalSeconds <= 0) return null
     val step = maxOf((SHARE_PROFILE_SECONDS + intervalSeconds - 1) / intervalSeconds, (n + SHARE_PROFILE_MAX_POINTS - 1) / SHARE_PROFILE_MAX_POINTS, 1)
-    val out = ArrayList<Byte>()
-    var previous = 0
-    var i = 0
-    while (i < n) {
-        val delta = depthDm[i] - previous
-        previous = depthDm[i]
-        var z = (delta shl 1) xor (delta shr 31)
-        while (z >= 0x80) {
-            out.add(((z and 0x7F) or 0x80).toByte())
-            z = z ushr 7
+    fun pack(values: List<Int>): String {
+        val out = ArrayList<Byte>()
+        var previous = 0
+        var i = 0
+        while (i < n) {
+            val delta = values[i] - previous
+            previous = values[i]
+            var z = (delta shl 1) xor (delta shr 31)
+            while (z >= 0x80) {
+                out.add(((z and 0x7F) or 0x80).toByte())
+                z = z ushr 7
+            }
+            out.add(z.toByte())
+            i += step
         }
-        out.add(z.toByte())
-        i += step
+        return Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT).encode(out.toByteArray())
     }
-    return SharedProfile(intervalSeconds * step, Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT).encode(out.toByteArray()))
+    return SharedProfile(intervalSeconds * step, pack(depthDm), tempDc.takeIf { it.size == n }?.let(::pack))
 }
 
-/** Reconstitue la courbe d'un lien ; `null` si elle est illisible. */
+/** Valeurs d'une série de la courbe partagée (écarts successifs en zigzag + varint). */
 @OptIn(ExperimentalEncodingApi::class)
-internal fun SharedProfile.toProfile(): DiveProfile? = runCatching {
-    val bytes = Base64.UrlSafe.withPadding(Base64.PaddingOption.PRESENT_OPTIONAL).decode(d)
-    val depths = ArrayList<Int>()
+private fun unpackSeries(text: String): List<Int> {
+    val bytes = Base64.UrlSafe.withPadding(Base64.PaddingOption.PRESENT_OPTIONAL).decode(text)
+    val values = ArrayList<Int>()
     var previous = 0
     var z = 0
     var shift = 0
@@ -157,10 +164,18 @@ internal fun SharedProfile.toProfile(): DiveProfile? = runCatching {
             shift += 7
         } else {
             previous += (z ushr 1) xor -(z and 1)
-            depths.add(previous)
+            values.add(previous)
             z = 0
             shift = 0
         }
     }
-    if (iv <= 0 || depths.size < 2 || depths.any { it < 0 || it > 3000 }) null else DiveProfile(iv, depths)
+    return values
+}
+
+/** Reconstitue la courbe d'un lien ; `null` si elle est illisible. Une température illisible ou de longueur différente est ignorée. */
+internal fun SharedProfile.toProfile(): DiveProfile? = runCatching {
+    val depths = unpackSeries(d)
+    if (iv <= 0 || depths.size < 2 || depths.any { it < 0 || it > 3000 }) return@runCatching null
+    val temps = t?.let { runCatching { unpackSeries(it) }.getOrNull() }?.takeIf { it.size == depths.size && it.all { v -> v in -500..1000 } }.orEmpty()
+    DiveProfile(iv, depths, tempDc = temps)
 }.getOrNull()
