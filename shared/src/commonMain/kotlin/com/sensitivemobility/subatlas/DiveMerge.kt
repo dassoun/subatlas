@@ -109,11 +109,23 @@ private fun mergeProfiles(a: DiveProfile?, b: DiveProfile?, gapSeconds: Int): Di
         depthDm = a.depthDm + List(gap) { 0 } + b.depthDm,
         tempDc = series(a.tempDc, b.tempDc, a.tempDc.lastOrNull() ?: 0),
         pressureBar = series(a.pressureBar, b.pressureBar, a.pressureBar.lastOrNull() ?: 0),
+        extraPressureBar = if (a.extraPressureBar.size == b.extraPressureBar.size) {
+            a.extraPressureBar.indices.map { series(a.extraPressureBar[it], b.extraPressureBar[it], a.extraPressureBar[it].lastOrNull() ?: 0) }
+                .takeIf { s -> s.all { it.isNotEmpty() } }.orEmpty()
+        } else emptyList(),
         ndlMin = series(a.ndlMin, b.ndlMin, 99),
         decoStopM = series(a.decoStopM, b.decoStopM, 0),
         ttsMin = series(a.ttsMin, b.ttsMin, 0),
         ppo2Cb = series(a.ppo2Cb, b.ppo2Cb, 21),
         cnsPct = series(a.cnsPct, b.cnsPct, a.cnsPct.lastOrNull() ?: 0),
+        gasSwitches = a.gasSwitches + b.gasSwitches.map { it.copy(index = it.index + a.depthDm.size + gap) },
+        alarms = a.alarms + b.alarms.map { it.copy(index = it.index + a.depthDm.size + gap) },
+        headingDeg = series(a.headingDeg, b.headingDeg, a.headingDeg.lastOrNull() ?: 0),
+        gfPct = series(a.gfPct, b.gfPct, a.gfPct.lastOrNull() ?: 0),
+        pulseBpm = series(a.pulseBpm, b.pulseBpm, a.pulseBpm.lastOrNull() ?: 0),
+        otu = series(a.otu, b.otu, a.otu.lastOrNull() ?: 0),
+        remainingBottomMin = series(a.remainingBottomMin, b.remainingBottomMin, 0),
+        diveMode = a.diveMode.ifBlank { b.diveMode },
     )
 }
 

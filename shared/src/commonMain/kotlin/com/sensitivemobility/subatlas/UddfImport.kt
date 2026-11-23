@@ -19,7 +19,28 @@ internal object UddfImport {
     class NotUddfException : Exception()
 
     /** Un point de courbe : temps (s), profondeur (m), température (°C) et pression de la bouteille (bar), quand ils sont connus. */
-    class Point(val time: Double, val depth: Double, val temp: Double?, val pressureBar: Double?)
+    class Point(
+        val time: Double,
+        val depth: Double,
+        val temp: Double?,
+        val pressuresBar: Map<Int, Double> = emptyMap(),
+        /** Temps sans palier restant (`nodecotime`), en secondes. */
+        val ndlSeconds: Double? = null,
+        /** Profondeur du palier (`decostop`), en mètres ; 0 sans palier ; `null` si le point ne dit rien des paliers. */
+        val decoDepth: Double? = null,
+        /** PPO2 en bar : mesurée, sinon calculée, sinon de consigne (recycleur). */
+        val ppo2Bar: Double? = null,
+        val cnsPct: Double? = null,
+        /** Nouveau mélange respiré à partir de ce point : (O₂ %, He %). */
+        val switchMix: Pair<Int, Int>? = null,
+        val alarms: List<String> = emptyList(),
+        val heading: Double? = null,
+        val gradientFactorPct: Double? = null,
+        val pulseBpm: Double? = null,
+        val otu: Double? = null,
+        val remainingBottomSeconds: Double? = null,
+        val diveMode: String = "",
+    )
 
     /** Le texte commence par une déclaration XML ou par la balise `<uddf` : le test peut se faire sur les premiers octets du fichier. */
     fun looksLikeUddf(bytes: ByteArray): Boolean {
@@ -71,7 +92,7 @@ internal object UddfImport {
             before?.child("equipmentused")?.all("link")?.mapNotNull { it.attrs["ref"] }.orEmpty()
 
         val duration = after?.num("diveduration")?.roundToInt()?.takeIf { it > 0 }
-        val points = points(node.child("samples"))
+        val points = points(node.child("samples"), node.all("tankdata").map { it.attrs["id"].orEmpty() }, mixes)
         val avgDepth = positive(after?.num("averagedepth"))?.let { round(it * 10) / 10 }
         val maxDepth = positive(after?.num("greatestdepth"))?.let { round(it * 10) / 10 }
             ?: points.maxOfOrNull { it.depth }?.takeIf { it > 0 }?.let { round(it * 10) / 10 }
@@ -159,10 +180,41 @@ internal object UddfImport {
         return Tank(volumeLiters = volume, o2Percent = o2 ?: 21, hePercent = he, pressureStartBar = start, pressureEndBar = end)
     }
 
-    private fun points(samples: XmlNode?): List<Point> = samples?.all("waypoint").orEmpty().mapNotNull { w ->
+    /**
+     * Les points de la courbe. La pression de chaque bouteille est rangée par numéro de bouteille : celui de la bouteille que
+     * désigne `ref` (l'ordre des `tankdata`), sinon l'ordre des éléments `tankpressure` du point.
+     */
+    private fun points(samples: XmlNode?, tankIds: List<String>, mixes: Map<String, XmlNode>): List<Point> = samples?.all("waypoint").orEmpty().mapNotNull { w ->
         val depth = w.num("depth") ?: return@mapNotNull null
         val time = w.num("divetime") ?: return@mapNotNull null
-        Point(time, depth, w.num("temperature")?.let { kelvinToCelsius(it) }, pressureToBar(w.num("tankpressure"))?.toDouble())
+        val pressures = mutableMapOf<Int, Double>()
+        w.all("tankpressure").forEachIndexed { order, n ->
+            val bar = pressureToBar(n.text.trim().replace(',', '.').toDoubleOrNull())?.toDouble() ?: return@forEachIndexed
+            val index = n.attrs["ref"]?.let { tankIds.indexOf(it) }?.takeIf { it >= 0 } ?: order
+            pressures.putIfAbsent(index, bar)
+        }
+        // Paliers : `<decostop decodepth="6" duration="120"/>` (UDDF 3.2), ou la profondeur en texte (UDDF 3.0 et avant) ; le plus profond.
+        val stops = w.all("decostop").mapNotNull { n -> (n.attrs["decodepth"]?.toDoubleOrNull() ?: n.text.trim().toDoubleOrNull())?.takeIf { it > 0 } }
+        val deco = if (stops.isNotEmpty()) stops.max() else if (w.num("nodecotime") != null) 0.0 else null
+        val ppo2 = (w.num("measuredpo2") ?: w.num("calculatedpo2") ?: w.num("setpo2"))?.let { if (it > 1000) it / 100_000.0 else it }?.takeIf { it > 0 }
+        Point(
+            time, depth, w.num("temperature")?.let { kelvinToCelsius(it) }, pressures,
+            ndlSeconds = w.num("nodecotime")?.takeIf { it >= 0 },
+            decoDepth = deco,
+            ppo2Bar = ppo2,
+            cnsPct = w.num("cns")?.takeIf { it >= 0 },
+            switchMix = w.child("switchmix")?.attrs?.get("ref")?.let { mixes[it] }?.let { m ->
+                m.num("o2")?.let { o2 -> fractionToPercent(o2) to (m.num("he")?.let { fractionToPercent(it) } ?: 0) }
+            },
+            alarms = w.all("alarm").map { it.text.trim().ifEmpty { it.attrs["type"].orEmpty() } }.filter { it.isNotEmpty() },
+            heading = w.num("heading")?.takeIf { it in 0.0..360.0 },
+            gradientFactorPct = w.num("gradientfactor")?.takeIf { it >= 0 }?.let { if (it <= 1) it * 100 else it },
+            // Le standard compte en hertz ; un logiciel qui écrit des battements par minute donne des valeurs bien plus grandes.
+            pulseBpm = w.num("pulserate")?.takeIf { it > 0 }?.let { if (it < 5) it * 60 else it },
+            otu = w.num("otu")?.takeIf { it >= 0 },
+            remainingBottomSeconds = w.num("remainingbottomtime")?.takeIf { it >= 0 },
+            diveMode = w.child("divemode")?.let { it.attrs["type"] ?: it.text.trim() }.orEmpty(),
+        )
     }
 
     /** Les paragraphes `<para>` d'un élément `<notes>` (ou son texte seul), un par ligne. */
@@ -205,8 +257,25 @@ internal object UddfImport {
         val median = deltas.getOrNull(deltas.size / 2) ?: return null
         var interval = listOf(1, 2, 3, 4, 5, 10, 15, 20, 30, 60).minByOrNull { abs(it - median) } ?: 10
         while (total / interval > 1500) interval *= 2 // une plongée très longue : on garde la courbe légère
-        val hasTemp = pts.count { it.temp != null } >= pts.size / 2
-        val hasPressure = pts.count { it.pressureBar != null } >= pts.size / 2
+
+        // Une grandeur mesurée seulement à certains points (la pression, parfois un point sur quatre) : la courbe relie les
+        // mesures, et reste à la première avant elle et à la dernière après elle. Moins de deux mesures : pas de courbe.
+        fun sparse(times: List<Double>, value: (Point) -> Double?): List<Double> {
+            val known = pts.mapNotNull { p -> value(p)?.let { p.time to it } }
+            if (known.size < 2) return emptyList()
+            return times.map { t ->
+                val next = known.indexOfFirst { it.first >= t }
+                when {
+                    next < 0 -> known.last().second
+                    next == 0 -> known.first().second
+                    else -> {
+                        val (ta, va) = known[next - 1]
+                        val (tb, vb) = known[next]
+                        if (tb == ta) vb else va + (vb - va) * ((t - ta) / (tb - ta))
+                    }
+                }
+            }
+        }
 
         fun at(t: Double, value: (Point) -> Double?): Double? {
             var i = pts.indexOfLast { it.time <= t }
@@ -220,11 +289,45 @@ internal object UddfImport {
 
         val count = (total / interval).toInt() + 1
         val times = List(count) { it * interval.toDouble() }
+        // Les paliers tiennent jusqu'au point suivant (une marche, pas une pente) ; sans information, on suppose « hors palier ».
+        val decoSteps = pts.filter { it.decoDepth != null }
+        val deco = if (decoSteps.any { (it.decoDepth ?: 0.0) > 0 }) times.map { t ->
+            round((decoSteps.lastOrNull { it.time <= t } ?: decoSteps.first()).decoDepth!!).toInt()
+        } else emptyList()
+        // LND : en minutes, plafonné à 99 ; en palier, il est nul.
+        val ndl = sparse(times) { it.ndlSeconds }.mapIndexed { i, sec ->
+            if (deco.isNotEmpty() && deco[i] > 0) 0 else (sec / 60).toInt().coerceIn(0, 99)
+        }
+        // Une grandeur qui tient jusqu'à la mesure suivante (le cap, qu'on ne moyenne pas entre 350° et 10°).
+        fun held(value: (Point) -> Double?): List<Int> {
+            val known = pts.mapNotNull { p -> value(p)?.let { p.time to it } }
+            if (known.isEmpty()) return emptyList()
+            return times.map { t -> round((known.lastOrNull { it.first <= t } ?: known.first()).second).toInt() }
+        }
+        fun indexOf(time: Double) = round(time / interval).toInt().coerceIn(0, count - 1)
+        var lastMix: Pair<Int, Int>? = null
+        val gasSwitches = pts.mapNotNull { p -> p.switchMix?.takeIf { it != lastMix }?.also { lastMix = it }?.let { GasSwitch(indexOf(p.time), it.first, it.second) } }
+        val alarms = pts.flatMap { p -> p.alarms.map { ProfileAlarm(indexOf(p.time), it) } }.distinct()
+        val tanks = pts.flatMap { it.pressuresBar.keys }.distinct().sorted()
+        val series = tanks.map { k -> sparse(times) { it.pressuresBar[k] }.map { round(it).toInt() } }.filter { it.isNotEmpty() }
         return DiveProfile(
             intervalSeconds = interval,
             depthDm = times.map { round((at(it) { p -> p.depth } ?: 0.0) * 10).toInt() },
-            tempDc = if (hasTemp) times.map { round((at(it) { p -> p.temp } ?: 0.0) * 10).toInt() } else emptyList(),
-            pressureBar = if (hasPressure) times.map { round(at(it) { p -> p.pressureBar } ?: 0.0).toInt() } else emptyList(),
+            tempDc = sparse(times) { it.temp }.map { round(it * 10).toInt() },
+            pressureBar = series.firstOrNull().orEmpty(),
+            extraPressureBar = series.drop(1),
+            ndlMin = ndl,
+            decoStopM = deco,
+            ppo2Cb = sparse(times) { it.ppo2Bar }.map { round(it * 100).toInt() },
+            cnsPct = sparse(times) { it.cnsPct }.map { round(it).toInt() },
+            gasSwitches = gasSwitches,
+            alarms = alarms,
+            headingDeg = held { it.heading }.map { it % 360 },
+            gfPct = sparse(times) { it.gradientFactorPct }.map { round(it).toInt() },
+            pulseBpm = sparse(times) { it.pulseBpm }.map { round(it).toInt() },
+            otu = sparse(times) { it.otu }.map { round(it).toInt() },
+            remainingBottomMin = sparse(times) { it.remainingBottomSeconds }.map { (it / 60).toInt() },
+            diveMode = pts.firstOrNull { it.diveMode.isNotBlank() }?.diveMode.orEmpty(),
         )
     }
 }

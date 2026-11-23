@@ -272,6 +272,7 @@ interface Strings {
     val seriesNdl: String
     val seriesDeco: String
     val seriesCns: String
+    val seriesTemp: String
     val seriesPpo2: String
     val seriesTts: String
     val ascentRateLabel: String
@@ -763,6 +764,7 @@ object FrStrings : Strings {
     override val seriesNdl = "LND"
     override val seriesDeco = "Déco"
     override val seriesCns = "CNS"
+    override val seriesTemp = "Température"
     override val seriesPpo2 = "PPO2"
     override val seriesTts = "TTS"
     override val ascentRateLabel = "Vitesse de remontée"
@@ -1345,6 +1347,7 @@ object EnStrings : Strings {
     override val seriesNdl = "NDL"
     override val seriesDeco = "Deco"
     override val seriesCns = "CNS"
+    override val seriesTemp = "Temperature"
     override val seriesPpo2 = "PPO2"
     override val seriesTts = "TTS"
     override val ascentRateLabel = "Ascent rate"

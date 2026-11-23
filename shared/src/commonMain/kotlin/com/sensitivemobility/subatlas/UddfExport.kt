@@ -147,6 +147,9 @@ internal object UddfExport {
                 val w = StringBuilder("<waypoint><depth>${decimal(depth / 10.0, 1)}</depth><divetime>${i.toLong() * p.intervalSeconds}</divetime>")
                 p.tempDc.getOrNull(i)?.let { w.append("<temperature>${decimal(it / 10.0 + 273.15, 2)}</temperature>") }
                 p.pressureBar.getOrNull(i)?.takeIf { it > 0 }?.let { w.append("<tankpressure ref=\"tank_${d.id}_1\">${it * 100_000L}</tankpressure>") }
+                p.extraPressureBar.forEachIndexed { k, series ->
+                    series.getOrNull(i)?.takeIf { it > 0 }?.let { w.append("<tankpressure ref=\"tank_${d.id}_${k + 2}\">${it * 100_000L}</tankpressure>") }
+                }
                 line(5, w.append("</waypoint>").toString())
             }
             line(4, "</samples>")

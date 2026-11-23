@@ -68,7 +68,7 @@ data class DiveComputer(
 
 /** Courbes que le graphique d'une plongée peut superposer à la profondeur (quand l'ordinateur les a enregistrées). */
 @Serializable
-enum class ChartSeries { PRESSURE, NDL, DECO, CNS, PPO2 }
+enum class ChartSeries { PRESSURE, NDL, DECO, CNS, PPO2, TEMP }
 
 /** Un seuil de vitesse de remontée : au-delà de [above] m/min, le tronçon de courbe prend la couleur [color] (index de [ASCENT_PALETTE]). */
 @Serializable

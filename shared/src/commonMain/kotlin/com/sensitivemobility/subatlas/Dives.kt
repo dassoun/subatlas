@@ -118,7 +118,9 @@ internal fun formatDistance(meters: Double): String = when {
     else -> "${round(meters / 1000).toLong()} km"
 }
 
-private fun Tank.gasLabel(s: Strings): String = when {
+private fun Tank.gasLabel(s: Strings): String = gasLabel(o2Percent, hePercent, s)
+
+internal fun gasLabel(o2Percent: Int, hePercent: Int, s: Strings): String = when {
     hePercent > 0 -> "${s.gasTrimix} $o2Percent/$hePercent"
     o2Percent == 21 -> s.gasAir
     else -> "${s.gasNitrox} $o2Percent"

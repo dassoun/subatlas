@@ -289,7 +289,7 @@ internal object ShearwaterImport {
      * courbe, qui serait fausse. Un vrai profil (plus de douze points) est rééchantillonné à intervalle régulier.
      */
     private fun uddfProfile(u: Uddf): DiveProfile? =
-        UddfImport.profileFrom(u.points.map { UddfImport.Point(it.first, it.second, it.third, null) })
+        UddfImport.profileFrom(u.points.map { UddfImport.Point(it.first, it.second, it.third) })
 
     // ------------------------------------------------------------------ Profil (format PNF)
 

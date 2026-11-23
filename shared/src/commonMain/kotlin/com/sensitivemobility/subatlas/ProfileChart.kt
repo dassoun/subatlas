@@ -60,12 +60,18 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.round
 import kotlin.math.roundToInt
 
 private val PressureColor = Color(0xFF8E7CC3)
-private val NdlColor = Color(0xFF2BB673)
+/** Les bouteilles suivantes : la teinte de la pression, plus claire (2) puis tirant sur le bleu (3 et plus). */
+private val ExtraPressureColors = listOf(Color(0xFFB9A9E0), Color(0xFF6FA3D8), Color(0xFFD6A0D6))
+/** Une couleur par mélange rencontré dans la plongée, dans l'ordre de leur premier usage. */
+private val GasColors = listOf(Color(0xFF4F9DDE), Color(0xFF2BB673), Color(0xFFF2A33A), Color(0xFFD16BA5), Color(0xFF8E7CC3))
+private val TempColor = Color(0xFFE8744F)
+private val NdlColor =Color(0xFF2BB673)
 internal val DecoColor = Color(0xFFE5484D)
 private val CnsColor = Color(0xFFF2A33A)
 private val Ppo2Color = Color(0xFFD16BA5)
@@ -132,6 +138,14 @@ internal fun ProfileChart(
     val hasDeco = profile.decoStopM.size == n && profile.decoStopM.any { it > 0 }
     val hasCns = profile.cnsPct.size == n
     val hasPpo2 = profile.ppo2Cb.size == n
+    // Mélanges : repérés seulement s'il y en a au moins deux ; la bande du haut les distingue, un par couleur.
+    val gasKeys = profile.gasSwitches.map { it.o2Percent to it.hePercent }.distinct()
+    val showGas = gasKeys.size >= 2
+    val hasTemp = profile.tempDc.size == n && profile.tempDc.any { it > 0 }
+    val showTemp = hasTemp && ChartSeries.TEMP in prefs.shown
+    // La température a son échelle : de la plus basse à la plus haute mesure, arrondies au degré (au moins 2° d'écart).
+    val tempMinC = if (hasTemp) floor((profile.tempDc.filter { it > 0 }.minOrNull() ?: 0) / 10.0) else 0.0
+    val tempMaxC = if (hasTemp) max(tempMinC + 2, ceil((profile.tempDc.maxOrNull() ?: 0) / 10.0)) else 2.0
     val showNdl = hasNdl && ChartSeries.NDL in prefs.shown
     val showDeco = hasDeco && ChartSeries.DECO in prefs.shown
     val showCns = hasCns && ChartSeries.CNS in prefs.shown
@@ -145,7 +159,8 @@ internal fun ProfileChart(
     val maxDepth = maxDepthShown / depthFactor
     val pressureFactor = if (u.imperial) Units.PSI_PER_BAR else 1.0
     val pressureStep = if (u.imperial) 500.0 else 50.0
-    val maxPressureShown = if (hasPressure) ceil((profile.pressureBar.maxOrNull() ?: 0) * pressureFactor / pressureStep) * pressureStep else 0.0
+    val pressureSeries = if (hasPressure) listOf(profile.pressureBar) + profile.extraPressureBar.filter { it.size == n } else emptyList()
+    val maxPressureShown = if (hasPressure) ceil((pressureSeries.maxOf { s -> s.maxOrNull() ?: 0 }) * pressureFactor / pressureStep) * pressureStep else 0.0
     val maxPressure = maxPressureShown / pressureFactor
     val total = max(1, profile.durationSeconds)
 
@@ -246,6 +261,7 @@ internal fun ProfileChart(
                 )
             }
             if (hasPressure) seriesChip(ChartSeries.PRESSURE, PressureColor, "${s.profilePressureLegend} (${u.pressure.unit})")
+            if (hasTemp) seriesChip(ChartSeries.TEMP, TempColor, "${s.seriesTemp} (${u.temperature.text(tempMinC)}–${u.temperature.text(tempMaxC)})")
             if (hasNdl) seriesChip(ChartSeries.NDL, NdlColor, "${s.seriesNdl} (0–99 min)")
             if (hasDeco) seriesChip(ChartSeries.DECO, DecoColor, "${s.seriesDeco} (${u.depth.unit})")
             if (hasCns) seriesChip(ChartSeries.CNS, CnsColor, "${s.seriesCns} (0–${cnsMax.roundToInt()} %)")
@@ -339,6 +355,21 @@ internal fun ProfileChart(
                     pr += pressureStep
                 }
             }
+            // Bande des mélanges, en haut du tracé : un segment par mélange, nommé à son début.
+            if (showGas) {
+                val bandH = 6f * density
+                profile.gasSwitches.forEachIndexed { k, g ->
+                    val from = g.index
+                    val to = profile.gasSwitches.getOrNull(k + 1)?.index ?: (n - 1)
+                    val x0 = x(from).coerceIn(p.left, p.left + p.width)
+                    val x1 = x(to).coerceIn(p.left, p.left + p.width)
+                    if (x1 <= x0) return@forEachIndexed
+                    val color = GasColors[gasKeys.indexOf(g.o2Percent to g.hePercent) % GasColors.size]
+                    drawRect(color.copy(alpha = 0.85f), Offset(x0, p.top), androidx.compose.ui.geometry.Size(x1 - x0, bandH))
+                    val t = measurer.measure(gasLabel(g.o2Percent, g.hePercent, s), labelStyle.copy(color = color))
+                    if (x1 - x0 > t.size.width + 6f * density) drawText(t, topLeft = Offset(x0 + 3f * density, p.top + bandH + 1f * density))
+                }
+            }
             clipRect(p.left, 0f, p.left + p.width * reveal.value, size.height) {
             // Courbes à échelle propre (LND, CNS, PPO2), tracées seulement pendant la plongée.
             fun inDive(i: Int) = profile.depthDm[i] >= 3 && profile.depthDm[i - 1] >= 3
@@ -373,16 +404,20 @@ internal fun ProfileChart(
             }
 
             // Les courbes à échelle propre, par-dessus l'eau et la surface du palier.
+            if (showTemp) seriesLine(profile.tempDc, TempColor) { p.top + p.height * (1f - ((it / 10.0 - tempMinC) / (tempMaxC - tempMinC)).toFloat().coerceIn(0f, 1f)) }
             if (showNdl) seriesLine(profile.ndlMin, NdlColor) { p.top + p.height * (1f - it.coerceIn(0, 99) / 99f) }
             if (showCns) seriesLine(profile.cnsPct, CnsColor) { p.top + p.height * (1f - (it / cnsMax).toFloat().coerceIn(0f, 1f)) }
             if (showPpo2) seriesLine(profile.ppo2Cb, Ppo2Color) { p.top + p.height * (1f - (it / 100.0 / ppo2Max).toFloat().coerceIn(0f, 1f)) }
             if (showPressure && maxPressure > 0) {
-                val pressureLine = Path()
-                profile.pressureBar.forEachIndexed { i, bar ->
-                    val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
-                    if (i == 0) pressureLine.moveTo(x(i), y) else pressureLine.lineTo(x(i), y)
+                pressureSeries.forEachIndexed { k, series ->
+                    val pressureLine = Path()
+                    series.forEachIndexed { i, bar ->
+                        val y = p.top + p.height * (1f - (bar / maxPressure).toFloat())
+                        if (i == 0) pressureLine.moveTo(x(i), y) else pressureLine.lineTo(x(i), y)
+                    }
+                    val color = if (k == 0) PressureColor else ExtraPressureColors[(k - 1) % ExtraPressureColors.size]
+                    drawPath(pressureLine, color, style = Stroke(width = 2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
-                drawPath(pressureLine, PressureColor, style = Stroke(width = 2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
 
             // La courbe de profondeur, puis le bord du palier : un trait rouge à la profondeur du palier, sur l'échelle des profondeurs.
@@ -421,7 +456,8 @@ internal fun ProfileChart(
                 "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}",
                 u.depth.text(profile.depthDm[i] / 10.0),
                 profile.tempDc.getOrNull(i)?.let { u.temperature.text(it / 10.0) },
-                if (hasPressure) u.pressure.text(profile.pressureBar[i].toDouble()) else null,
+                if (hasPressure) pressureSeries.joinToString(" / ") { u.pressure.text(it[i].toDouble()) } else null,
+                if (showGas) profile.gasSwitches.lastOrNull { it.index <= i }?.let { gasLabel(it.o2Percent, it.hePercent, s) } else null,
                 if (showNdl && profile.depthDm[i] >= 3) "${s.seriesNdl} ${profile.ndlMin[i].let { if (it >= 99) "99+" else "$it" }} min" else null,
                 if (showDeco && profile.decoStopM[i] > 0) "${s.seriesDeco} ${u.depth.text(profile.decoStopM[i].toDouble())}" +
                     (profile.ttsMin.getOrNull(i)?.let { " (${s.seriesTts} $it min)" } ?: "") else null,

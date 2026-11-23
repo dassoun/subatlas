@@ -174,6 +174,14 @@ data class Person(
     val email: String = "",
 )
 
+/** Un changement de mélange en cours de plongée : à partir de l'échantillon [index], on respire ce gaz. */
+@Serializable
+data class GasSwitch(val index: Int, val o2Percent: Int, val hePercent: Int = 0)
+
+/** Une alarme de l'ordinateur (texte brut : « ascent », « deco »…) à l'échantillon [index]. */
+@Serializable
+data class ProfileAlarm(val index: Int, val text: String)
+
 /** Courbe d'une plongée lue sur un ordinateur de plongée : un point par échantillon, à intervalle régulier. */
 @Serializable
 data class DiveProfile(
@@ -184,6 +192,8 @@ data class DiveProfile(
     val tempDc: List<Int> = emptyList(),
     /** Pression de la bouteille 1 en bar ; vide s'il n'y avait pas de capteur. */
     val pressureBar: List<Int> = emptyList(),
+    /** Pression des bouteilles suivantes (2, 3…) en bar, une série par bouteille, chacune de la taille de la courbe. */
+    val extraPressureBar: List<List<Int>> = emptyList(),
     /** LND (temps sans palier restant) en minutes, plafonné à 99 ; vide si inconnu. */
     val ndlMin: List<Int> = emptyList(),
     /** Profondeur du premier palier (plafond de décompression) en mètres, 0 hors décompression ; vide si inconnu. */
@@ -194,6 +204,22 @@ data class DiveProfile(
     val ppo2Cb: List<Int> = emptyList(),
     /** Toxicité à l'oxygène (CNS) en pourcent ; vide si inconnue. */
     val cnsPct: List<Int> = emptyList(),
+    /** Changements de mélange, dans l'ordre ; vide si l'ordinateur n'en a pas noté. */
+    val gasSwitches: List<GasSwitch> = emptyList(),
+    /** Alarmes de l'ordinateur, dans l'ordre. */
+    val alarms: List<ProfileAlarm> = emptyList(),
+    /** Cap du compas en degrés (0–359) ; vide si inconnu. */
+    val headingDeg: List<Int> = emptyList(),
+    /** Gradient factor en pourcent ; vide si inconnu. */
+    val gfPct: List<Int> = emptyList(),
+    /** Pouls en battements par minute ; vide si inconnu. */
+    val pulseBpm: List<Int> = emptyList(),
+    /** OTU (dose d'oxygène cumulée) ; vide si inconnue. */
+    val otu: List<Int> = emptyList(),
+    /** Temps de fond restant en minutes ; vide si inconnu. */
+    val remainingBottomMin: List<Int> = emptyList(),
+    /** Mode de plongée noté par l'ordinateur (« opencircuit », « closedcircuit »…) ; vide si inconnu. */
+    val diveMode: String = "",
 ) {
     val durationSeconds: Int get() = (depthDm.size - 1).coerceAtLeast(0) * intervalSeconds
 

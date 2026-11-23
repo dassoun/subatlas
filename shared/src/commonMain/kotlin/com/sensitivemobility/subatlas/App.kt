@@ -217,6 +217,23 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                     incomingSites = sitesFile
                     return@launch
                 }
+                // Un export complet de SubAtlas (Réglages > Données > Exporter) : on propose de le fusionner ou de remplacer.
+                val backup = withContext(Dispatchers.Default) {
+                    val head = incomingFile.copyOfRange(0, minOf(incomingFile.size, 8)).decodeToString().removePrefix("﻿").trimStart()
+                    if (head.startsWith("{")) {
+                        try {
+                            BackupCodec.decode(incomingFile.decodeToString())
+                        } catch (e: BackupException) {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
+                if (backup != null) {
+                    pendingImport = backup
+                    return@launch
+                }
                 try {
                     incomingReading = true
                     val file = try {
