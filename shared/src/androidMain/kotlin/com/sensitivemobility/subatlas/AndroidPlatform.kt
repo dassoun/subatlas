@@ -32,17 +32,33 @@ actual fun BackHandler(enabled: Boolean, onBack: () -> Unit) = ActivityBackHandl
 
 class AndroidStorage(context: Context) : Storage {
     private val dir = context.filesDir
-    override fun read(name: String): String? = File(dir, name).takeIf { it.exists() }?.readText()
-    override fun write(name: String, text: String) = File(dir, name).writeText(text)
+    private val noBackupDir = context.noBackupFilesDir
+
+    /** Les noms « nobackup/… » (état de synchro) vont dans un dossier que les sauvegardes automatiques d'Android ignorent. */
+    private fun file(name: String): File =
+        if (name.startsWith(NO_BACKUP)) File(noBackupDir, name.removePrefix(NO_BACKUP)) else File(dir, name)
+
+    override fun read(name: String): String? = file(name).takeIf { it.exists() }?.readText()
+    override fun write(name: String, text: String) {
+        // Écriture dans un fichier voisin puis renommage : une coupure en plein enregistrement laisse l'ancien fichier intact.
+        val target = file(name)
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) { target.writeText(text); tmp.delete() }
+    }
 
     // Photos : « photos/123.jpg » est rangé dans un sous-dossier des fichiers privés de l'appli (invisible des autres applis).
-    override fun readBytes(name: String): ByteArray? = runCatching { File(dir, name).takeIf { it.isFile }?.readBytes() }.getOrNull()
+    override fun readBytes(name: String): ByteArray? = runCatching { file(name).takeIf { it.isFile }?.readBytes() }.getOrNull()
     override fun writeBytes(name: String, bytes: ByteArray): Boolean = runCatching {
-        File(dir, name).also { it.parentFile?.mkdirs() }.writeBytes(bytes)
+        file(name).also { it.parentFile?.mkdirs() }.writeBytes(bytes)
         true
     }.getOrDefault(false)
     override fun delete(name: String) {
-        runCatching { File(dir, name).delete() }
+        runCatching { file(name).delete() }
+    }
+
+    private companion object {
+        const val NO_BACKUP = "nobackup/"
     }
 }
 
@@ -62,6 +78,10 @@ class AndroidPlatformActions(
     requestBlePermissions: suspend () -> Boolean,
 ) : PlatformActions {
     override val ble: BleTransport = AndroidBle(context, requestBlePermissions)
+
+    override val secretStore: SecretStore = AndroidSecretStore(context)
+
+    override fun deviceName(): String = "SubAtlas (" + Build.MANUFACTURER.replaceFirstChar { it.uppercase() } + " " + Build.MODEL + ")"
 
     private val foreground = kotlinx.coroutines.flow.MutableStateFlow(true)
     override val appInForeground: kotlinx.coroutines.flow.StateFlow<Boolean> get() = foreground
@@ -181,6 +201,52 @@ class AndroidPlatformActions(
                 connection.disconnect()
             }
         }.getOrNull()
+    }
+
+    override val allowsCleartextHttp: Boolean
+        get() = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    override suspend fun httpRequest(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        contentType: String?,
+        timeoutMillis: Int,
+    ): HttpResponse = withContext(Dispatchers.IO) {
+        try {
+            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = timeoutMillis
+                connection.readTimeout = timeoutMillis
+                // HttpURLConnection refuse la méthode PATCH : on envoie un POST que le serveur lit comme un PATCH.
+                if (method == "PATCH") {
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+                } else {
+                    connection.requestMethod = method
+                }
+                headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
+                if (body != null) {
+                    connection.doOutput = true
+                    if (contentType != null) connection.setRequestProperty("Content-Type", contentType)
+                    // Pas de mode « flux » : sur une réponse 401, il ferait lever HttpRetryException au lieu de rendre la réponse.
+                    connection.outputStream.use { it.write(body) }
+                }
+                val status = connection.responseCode
+                val stream = if (status >= 400) connection.errorStream else connection.inputStream
+                val bytes = stream?.use { it.readBytes() } ?: ByteArray(0)
+                val responseHeaders = connection.headerFields
+                    .filterKeys { it != null }
+                    .entries.associate { (k, v) -> k.lowercase() to v.joinToString(", ") }
+                HttpResponse(status, responseHeaders, bytes)
+            } finally {
+                connection.disconnect()
+            }
+        } catch (e: java.io.IOException) {
+            throw NetworkException(e.javaClass.simpleName)
+        }
     }
 
     override suspend fun httpGetBytes(url: String, userAgent: String): ByteArray? = withContext(Dispatchers.IO) {

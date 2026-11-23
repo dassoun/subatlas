@@ -395,6 +395,9 @@ interface Strings {
     fun confirmDeleteSiteWithDives(name: String, diveCount: Int): String
     fun confirmDeleteDive(site: String, date: String): String
 
+    /** Textes de la synchronisation avec SubAtlas.com. */
+    val sync: SyncStrings
+
     // Réglages
     val themeSection: String
     val unitsSection: String
@@ -995,6 +998,7 @@ object FrStrings : Strings {
         ),
     )
     override val languageSystem = "Système"
+    override val sync: SyncStrings = FrSyncStrings
     override val dataSection = "Données"
     override val importFromApps = "Importer depuis d'autres applications"
     override val dataHint = "Enregistrez vos plongées, sites et check-lists dans un fichier, ou restaurez-les depuis une sauvegarde."
@@ -1578,6 +1582,7 @@ object EnStrings : Strings {
         ),
     )
     override val languageSystem = "System"
+    override val sync: SyncStrings = EnSyncStrings
     override val dataSection = "Data"
     override val importFromApps = "Import from other apps"
     override val dataHint = "Save your dives, sites and checklists to a file, or restore them from a backup."

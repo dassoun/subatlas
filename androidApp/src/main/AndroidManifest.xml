@@ -45,6 +45,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="subatlas" android:host="dive" />
             </intent-filter>
+            <!-- Connexion à SubAtlas.com : subatlas://connect?server=…&code=… (QR « Connecter un appareil » du site) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="subatlas" android:host="connect" />
+            </intent-filter>
             <!-- Fichier partagé depuis une autre appli (export Shearwater .db) : « Partager > SubAtlas » -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

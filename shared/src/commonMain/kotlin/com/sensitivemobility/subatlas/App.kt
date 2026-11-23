@@ -171,6 +171,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val scope = rememberCoroutineScope()
     // Détection et import des nouvelles plongées de l'ordinateur associé, tant que l'appli est ouverte.
     val computerImport = remember { ComputerImport(state, actions, scope) { strings } }
+    val sync = remember { SyncController(state, actions, storage, scope) { strings is FrStrings } }
     var pendingImport by remember { mutableStateOf<ImportData?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var sharedIncoming by remember { mutableStateOf<SharedDive?>(null) }
@@ -186,6 +187,12 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     val incoming = IncomingLink.pending
     LaunchedEffect(incoming) {
         if (incoming != null) {
+            // Lien de connexion du site (QR « Connecter un appareil ») : ouvre Réglages avec l'adresse et le code préremplis.
+            if (incoming.startsWith("subatlas://connect", ignoreCase = true)) {
+                IncomingLink.pending = null
+                if (sync.available && sync.prefillFromLink(incoming)) goTab(Screen.Settings)
+                return@LaunchedEffect
+            }
             val decoded = DiveLink.decode(incoming)
             IncomingLink.pending = null
             if (decoded != null) sharedIncoming = decoded else notice = strings.sharedInvalid
@@ -447,7 +454,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         CenterList(state, pad, onOpen = { push(Screen.CenterDetail(it)) }, onAdd = { push(Screen.CenterForm(null)) }, listState = centersListState)
                     Screen.Checklists -> ChecklistList(state, pad, onOpen = { push(Screen.ChecklistDetail(it)) }, listState = checklistsListState)
                     Screen.Safety -> SafetyList(pad, actions, onOpen = { push(Screen.SafetyDetail(it)) })
-                    else -> SettingsScreen(state, actions, computerImport, pad, onExport = ::startExport, onImport = ::startImport, onExportSites = ::startExportSites, onImportSites = ::startImportSites, onExportUddf = ::startExportUddf)
+                    else -> SettingsScreen(state, actions, computerImport, sync, pad, onExport = ::startExport, onImport = ::startImport, onExportSites = ::startExportSites, onImportSites = ::startImportSites, onExportUddf = ::startExportUddf)
                 }
             }
 
@@ -734,6 +741,7 @@ private fun SettingsScreen(
     state: AppState,
     actions: PlatformActions,
     computerImport: ComputerImport,
+    sync: SyncController,
     pad: PaddingValues,
     onExport: () -> Unit,
     onImport: () -> Unit,
@@ -837,6 +845,7 @@ private fun SettingsScreen(
         OutlinedButton(onClick = onImportSites, modifier = Modifier.fillMaxWidth()) { Text(s.importSites) }
         Text(s.uddfHint, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = onExportUddf, modifier = Modifier.fillMaxWidth()) { Text(s.exportUddf) }
+        SyncSection(sync)
         // Imports depuis d'autres applications : regroupés sous leur propre intitulé.
         Text(s.importFromApps, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
         DiveImportButtons(state, actions)
@@ -1011,7 +1020,7 @@ private fun TabLabel(text: String) {
 }
 
 @Composable
-private fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
 }
 

@@ -14,6 +14,10 @@ data class DiveSite(
     val notes: String = "",
     val country: String = "",
     val type: SiteType? = null,
+    /** Identifiant stable (UUID v4) du site, partagé avec SubAtlas.com : attribué une fois par [AppState], jamais modifié ensuite (sauf adoption de celui du serveur). */
+    val uuid: String = "",
+    /** Dernière modification locale (instant UTC, ISO 8601) ; mis à jour par [AppState] à chaque enregistrement. */
+    val updatedAt: String = "",
 )
 
 /** « 🇫🇷 France · Site » : le pays (avec son drapeau) vient avant le nom du site. */
@@ -280,6 +284,10 @@ data class Dive(
     val profile: DiveProfile? = null,
     /** Photos de la plongée, la première étant la couverture. Les fichiers sont dans le stockage de l'appli (voir [DivePhoto]). */
     val photos: List<DivePhoto> = emptyList(),
+    /** Identifiant stable (UUID v4) de la plongée, partagé avec SubAtlas.com : attribué une fois par [AppState]. */
+    val uuid: String = "",
+    /** Dernière modification locale (instant UTC, ISO 8601) ; mis à jour par [AppState] à chaque enregistrement. */
+    val updatedAt: String = "",
 ) {
     /** Profondeur max : celle de la plongée, sinon (anciennes données) la plus grande saisie par bouteille. */
     val maxDepth: Double? get() = maxDepthMeters ?: tanks.mapNotNull { it.maxDepthMeters }.maxOrNull()

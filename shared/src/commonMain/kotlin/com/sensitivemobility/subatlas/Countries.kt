@@ -308,3 +308,11 @@ internal fun countrySuggestions(query: String, french: Boolean, limit: Int): Lis
         .take(limit)
         .map { it.first to flagOf(it.second) }
 }
+
+/** Code ISO à deux lettres (majuscules) du pays saisi ; `null` s'il n'est pas reconnu. */
+internal fun countryIsoCode(country: String): String? =
+    countryKey(country).takeIf { it.length == 2 && it.all { c -> c in 'A'..'Z' } }
+
+/** Nom du pays dans la langue demandée (sans drapeau) pour un code ISO ; `null` si le code est inconnu. */
+internal fun countryNameFor(code: String, french: Boolean): String? =
+    countries.firstOrNull { it.code.equals(code, ignoreCase = true) }?.let { if (french) it.fr else it.en }

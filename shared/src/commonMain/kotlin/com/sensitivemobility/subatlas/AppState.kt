@@ -61,6 +61,33 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         checklists += load(CHECKLISTS_FILE, checklistSerializer) ?: defaultChecklists().also {
             storage.write(CHECKLISTS_FILE, json.encodeToString(checklistSerializer, it))
         }
+        ensureIdentity()
+    }
+
+    /**
+     * Donne un uuid et une date de modification aux sites et plongées qui n'en ont pas (données d'avant la synchronisation,
+     * sauvegarde ancienne) et enregistre aussitôt : l'identifiant est attribué UNE fois, il ne dépend jamais de la lecture.
+     */
+    private fun ensureIdentity() {
+        var sitesChanged = false
+        var divesChanged = false
+        val now = nowIso()
+        for (i in sites.indices) {
+            val s = sites[i]
+            if (s.uuid.isBlank() || s.updatedAt.isBlank()) {
+                sites[i] = s.copy(uuid = s.uuid.ifBlank { newUuid() }, updatedAt = s.updatedAt.ifBlank { now })
+                sitesChanged = true
+            }
+        }
+        for (i in dives.indices) {
+            val d = dives[i]
+            if (d.uuid.isBlank() || d.updatedAt.isBlank()) {
+                dives[i] = d.copy(uuid = d.uuid.ifBlank { newUuid() }, updatedAt = d.updatedAt.ifBlank { now })
+                divesChanged = true
+            }
+        }
+        if (sitesChanged) saveSites()
+        if (divesChanged) saveDives()
     }
 
     private fun <T> load(file: String, serializer: kotlinx.serialization.KSerializer<T>): T? =
@@ -101,7 +128,8 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         }
         data.sites.forEach { s ->
             val i = sites.indexOfFirst { it.id == s.id }
-            if (i >= 0) sites[i] = s else sites.add(s)
+            // Une sauvegarde d'avant la synchronisation n'a pas d'uuid : le site déjà présent garde le sien.
+            if (i >= 0) sites[i] = s.copy(uuid = s.uuid.ifBlank { sites[i].uuid }, updatedAt = s.updatedAt.ifBlank { sites[i].updatedAt }) else sites.add(s)
         }
         data.checklists.forEach { c ->
             val i = checklists.indexOfFirst { it.id == c.id }
@@ -113,11 +141,12 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         }
         data.dives?.forEach { d ->
             val i = dives.indexOfFirst { it.id == d.id }
-            if (i >= 0) dives[i] = d else dives.add(d)
+            if (i >= 0) dives[i] = d.copy(uuid = d.uuid.ifBlank { dives[i].uuid }, updatedAt = d.updatedAt.ifBlank { dives[i].updatedAt }) else dives.add(d)
         }
         // Les identifiants viennent de l'horloge : on évite d'en redonner un déjà présent dans les données importées.
         val maxId = (data.sites.map { it.id } + data.centers.orEmpty().map { it.id } + data.dives.orEmpty().map { it.id } + data.checklists.flatMap { c -> listOf(c.id) + c.items.map { it.id } }).maxOrNull()
         if (maxId != null) lastId = maxOf(lastId, maxId)
+        ensureIdentity()
         saveSites()
         saveCenters()
         saveDives()
@@ -127,9 +156,15 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     // --- Sites ---
     fun site(id: Long) = sites.firstOrNull { it.id == id }
 
-    fun saveSite(site: DiveSite, persist: Boolean = true) {
+    /**
+     * Enregistre le site. L'uuid est celui déjà connu pour cet [DiveSite.id] (les formulaires reconstruisent le site de zéro),
+     * sinon un nouveau. [touch] : date de modification mise à l'instant ; la synchronisation passe `false` pour écrire la sienne.
+     */
+    fun saveSite(site: DiveSite, persist: Boolean = true, touch: Boolean = true) {
         val i = sites.indexOfFirst { it.id == site.id }
-        if (i >= 0) sites[i] = site else sites.add(site)
+        val uuid = site.uuid.ifBlank { sites.getOrNull(i)?.uuid.orEmpty() }.ifBlank { newUuid() }
+        val stamped = site.copy(uuid = uuid, updatedAt = if (touch || site.updatedAt.isBlank()) nowIso() else site.updatedAt)
+        if (i >= 0) sites[i] = stamped else sites.add(stamped)
         if (persist) saveSites()
     }
 
@@ -199,7 +234,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         var moved = 0
         for (i in dives.indices) {
             if (dives[i].siteId in gone) {
-                dives[i] = dives[i].copy(siteId = keeperId)
+                dives[i] = dives[i].copy(siteId = keeperId, updatedAt = nowIso())
                 moved++
             }
         }
@@ -448,7 +483,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     /** Ajoute au carnet une plongée reçue en fichier, avec toutes ses données (courbe, bouteilles, conditions…). */
     fun addDiveFile(file: DiveFile): Long {
-        val dive = file.dive.copy(id = newId(), siteId = siteFor(file.site).id, importKey = "", noMerge = false, photos = emptyList())
+        val dive = file.dive.copy(id = newId(), siteId = siteFor(file.site).id, importKey = "", noMerge = false, photos = emptyList(), uuid = "", updatedAt = "")
         saveDive(dive)
         return dive.id
     }
@@ -477,9 +512,12 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
 
     fun divesAt(siteId: Long) = dives.filter { it.siteId == siteId }.sortedWith(diveOrder)
 
-    fun saveDive(dive: Dive, persist: Boolean = true) {
+    /** Enregistre la plongée ; mêmes règles que [saveSite] pour l'uuid et la date de modification. */
+    fun saveDive(dive: Dive, persist: Boolean = true, touch: Boolean = true) {
         val i = dives.indexOfFirst { it.id == dive.id }
-        if (i >= 0) dives[i] = dive else dives.add(dive)
+        val uuid = dive.uuid.ifBlank { dives.getOrNull(i)?.uuid.orEmpty() }.ifBlank { newUuid() }
+        val stamped = dive.copy(uuid = uuid, updatedAt = if (touch || dive.updatedAt.isBlank()) nowIso() else dive.updatedAt)
+        if (i >= 0) dives[i] = stamped else dives.add(stamped)
         if (persist) saveDives()
     }
 
@@ -594,6 +632,24 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /** Octets de la photo (ou de sa vignette) ; `null` si le fichier manque. Lecture de fichier : pas sur le fil principal. */
+    /** Ajoute à la plongée une photo reçue de SubAtlas.com (déjà réduite par le site) ; `false` si les fichiers n'ont pas pu être écrits. */
+    fun addSyncedPhoto(diveId: Long, photo: DivePhoto, full: ByteArray, thumb: ByteArray): Boolean {
+        val dive = dive(diveId) ?: return false
+        if (!storage.writeBytes(photo.fileName, full) || !storage.writeBytes(photo.thumbName, thumb)) return false
+        saveDive(dive.copy(photos = dive.photos + photo), persist = false, touch = false)
+        return true
+    }
+
+    fun diveByUuid(uuid: String) = dives.firstOrNull { it.uuid == uuid }
+
+    fun siteByUuid(uuid: String) = sites.firstOrNull { it.uuid == uuid }
+
+    /** Écrit sur disque les plongées et les sites après une série de `saveDive` / `saveSite` sans `persist`. */
+    fun persistDivesAndSites() {
+        saveSites()
+        saveDives()
+    }
+
     fun photoBytes(photo: DivePhoto, thumb: Boolean): ByteArray? = storage.readBytes(if (thumb) photo.thumbName else photo.fileName)
 
     // --- Centres de plongée ---

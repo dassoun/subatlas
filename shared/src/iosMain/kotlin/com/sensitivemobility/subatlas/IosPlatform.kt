@@ -58,15 +58,18 @@ class IosStorage : Storage {
     private val dir: String =
         NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true).first() as String
 
+    /** "nobackup/sync.json" devient "nobackup_sync.json" : pas de sous-dossier ici. Pas encore exclu d'iCloud (non verifie). */
+    private fun flat(name: String) = name.replace("nobackup/", "nobackup_")
+
     override fun read(name: String): String? {
-        val path = "$dir/$name"
+        val path = "$dir/${flat(name)}"
         if (!NSFileManager.defaultManager.fileExistsAtPath(path)) return null
         return NSString.stringWithContentsOfFile(path, NSUTF8StringEncoding, null)
     }
 
     @Suppress("CAST_NEVER_SUCCEEDS")
     override fun write(name: String, text: String) {
-        (text as NSString).writeToFile("$dir/$name", atomically = true, encoding = NSUTF8StringEncoding, error = null)
+        (text as NSString).writeToFile("$dir/${flat(name)}", atomically = true, encoding = NSUTF8StringEncoding, error = null)
     }
 }
 
@@ -76,6 +79,8 @@ private fun NSData.toByteArray(): ByteArray = ByteArray(length.toInt()).apply {
 }
 
 class IosPlatformActions : PlatformActions {
+    override val secretStore: SecretStore = IosSecretStore(IosStorage())
+
     override fun openLink(url: String) {
         val nsUrl = NSURL.URLWithString(url) ?: return
         UIApplication.sharedApplication.openURL(nsUrl, emptyMap<Any?, Any?>(), null)
@@ -143,6 +148,43 @@ class IosPlatformActions : PlatformActions {
         val task = NSURLSession.sharedSession.dataTaskWithRequest(request) { data, response, error ->
             val status = (response as? NSHTTPURLResponse)?.statusCode
             cont.resume(if (error == null && data != null && status == 200L) data.toByteArray() else null)
+        }
+        cont.invokeOnCancellation { task.cancel() }
+        task.resume()
+    }
+
+    // NON VERIFIE : ce code iOS n'a pas pu etre compile ici.
+    @OptIn(ExperimentalForeignApi::class)
+    override suspend fun httpRequest(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        contentType: String?,
+        timeoutMillis: Int,
+    ): HttpResponse = suspendCancellableCoroutine { cont ->
+        val nsUrl = NSURL.URLWithString(url)
+        if (nsUrl == null) {
+            cont.resumeWith(Result.failure(NetworkException("adresse illisible")))
+            return@suspendCancellableCoroutine
+        }
+        val request = NSMutableURLRequest.requestWithURL(nsUrl)
+        request.HTTPMethod = method
+        request.timeoutInterval = timeoutMillis / 1000.0
+        headers.forEach { (k, v) -> request.setValue(v, forHTTPHeaderField = k) }
+        if (body != null) {
+            if (contentType != null) request.setValue(contentType, forHTTPHeaderField = "Content-Type")
+            request.HTTPBody = if (body.isEmpty()) NSData() else body.usePinned { NSData.create(bytes = it.addressOf(0), length = body.size.toULong()) }
+        }
+        val task = redirectBlockingSession.dataTaskWithRequest(request) { data, response, error ->
+            val http = response as? NSHTTPURLResponse
+            if (error != null || http == null) {
+                cont.resumeWith(Result.failure(NetworkException("réseau")))
+            } else {
+                val responseHeaders = HashMap<String, String>()
+                http.allHeaderFields.forEach { (k, v) -> if (k != null && v != null) responseHeaders[k.toString().lowercase()] = v.toString() }
+                cont.resume(HttpResponse(http.statusCode.toInt(), responseHeaders, data?.toByteArray() ?: ByteArray(0)))
+            }
         }
         cont.invokeOnCancellation { task.cancel() }
         task.resume()
@@ -250,4 +292,33 @@ fun MainViewController() = ComposeUIViewController {
         actions = IosPlatformActions(),
         contacts = IosContactsProvider(),
     )
+}
+
+/** Session qui ne suit PAS les redirections : la synchro décide elle-même (le jeton ne doit pas partir vers un autre serveur). NON VERIFIE. */
+private class RedirectBlocker : NSObject(), platform.Foundation.NSURLSessionTaskDelegateProtocol {
+    override fun URLSession(
+        session: NSURLSession,
+        task: platform.Foundation.NSURLSessionTask,
+        willPerformHTTPRedirection: NSHTTPURLResponse,
+        newRequest: platform.Foundation.NSURLRequest,
+        completionHandler: (platform.Foundation.NSURLRequest?) -> Unit,
+    ) = completionHandler(null)
+}
+
+private val redirectBlockingSession: NSURLSession by lazy {
+    NSURLSession.sessionWithConfiguration(
+        platform.Foundation.NSURLSessionConfiguration.defaultSessionConfiguration,
+        delegate = RedirectBlocker(),
+        delegateQueue = null,
+    )
+}
+
+/**
+ * Jeton d'accès à SubAtlas.com sur iOS. NON VERIFIE (iOS non compilable ici) et PAS ENCORE CHIFFRE : à remplacer par le Keychain.
+ * Gardé dans un fichier du dossier de l'appli, hors de tout export.
+ */
+internal class IosSecretStore(private val storage: Storage) : SecretStore {
+    override fun get(): String? = storage.read("nobackup/sync_token")?.takeIf { it.isNotBlank() }
+    override fun set(token: String) = storage.write("nobackup/sync_token", token)
+    override fun clear() = storage.write("nobackup/sync_token", "")
 }

@@ -14,6 +14,8 @@ kotlin {
         androidResources {
             enable = true
         }
+        // Tests unitaires du code commun, executes sur l'ordinateur (JVM) : ./gradlew :shared:testAndroidHostTest
+        withHostTest { }
     }
 
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
@@ -33,6 +35,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.datetime)
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)

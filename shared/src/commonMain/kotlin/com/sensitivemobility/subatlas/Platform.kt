@@ -51,6 +51,15 @@ interface ContactsProvider {
     suspend fun pick(): PhoneContact? = null
 }
 
+/** Réponse HTTP complète : le code (y compris 4xx et 5xx), les en-têtes (noms en minuscules) et le corps tel quel. */
+class HttpResponse(val status: Int, val headers: Map<String, String>, val body: ByteArray) {
+    fun header(name: String): String? = headers[name.lowercase()]
+    val text: String get() = body.decodeToString()
+}
+
+/** Pas de réponse : pas de réseau, délai dépassé, connexion coupée, ou plateforme qui ne sait pas faire de requête. */
+class NetworkException(message: String) : Exception(message)
+
 private val AlwaysForeground = kotlinx.coroutines.flow.MutableStateFlow(true)
 
 /** Actions propres à la plateforme. */
@@ -89,6 +98,30 @@ interface PlatformActions {
      * code d'erreur, délai dépassé) ou si la plateforme ne sait pas le faire.
      */
     suspend fun httpGet(url: String, userAgent: String): String? = null
+
+    /**
+     * Requête HTTP quelconque, pour la synchronisation avec SubAtlas.com. Renvoie la réponse quel que soit son code (une erreur
+     * 401, 422 ou 429 est une réponse comme une autre) ; lève [NetworkException] seulement si aucune réponse n'est obtenue.
+     * Les redirections ne sont PAS suivies : l'appelant décide (le jeton ne doit pas partir vers un autre serveur).
+     * [method] : GET, POST, PUT, PATCH ou DELETE. [contentType] n'a de sens qu'avec un [body].
+     */
+    suspend fun httpRequest(
+        method: String,
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        body: ByteArray? = null,
+        contentType: String? = null,
+        timeoutMillis: Int = 20_000,
+    ): HttpResponse = throw NetworkException("requête HTTP non disponible sur cette plateforme")
+
+    /** Stockage du jeton d'accès à SubAtlas.com, chiffré si la plateforme le permet ; `null` : la synchronisation n'est pas proposée. */
+    val secretStore: SecretStore? get() = null
+
+    /** Nom de cet appareil, tel que le site l'affiche dans « Appareils et API ». */
+    fun deviceName(): String = "SubAtlas"
+
+    /** `true` si les adresses `http://` (sans chiffrement) sont acceptées pour la synchronisation : seulement dans une version de développement. */
+    val allowsCleartextHttp: Boolean get() = false
 
     /**
      * `true` si le téléphone a une connexion internet qui fonctionne. Sert à choisir la carte à l'ouverture (satellite avec

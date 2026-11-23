@@ -49,6 +49,9 @@ object DiveFileCodec {
             importKey = "",
             importModified = emptyMap(),
             noMerge = false,
+            // L'identité de la plongée dans le carnet de l'expéditeur (et sur SubAtlas.com) ne se partage pas.
+            uuid = "",
+            updatedAt = "",
             // Les photos sont des fichiers de ce téléphone : le binôme n'aurait que des références vides.
             photos = emptyList(),
         )
