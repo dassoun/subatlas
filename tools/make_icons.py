@@ -56,13 +56,19 @@ def logo_bbox(img, bg, threshold=24):
 
 def centered_logo(img, bg, bbox, canvas_px, fraction):
     """Crop the logo, scale it to `fraction` of the canvas, centre it on a bg canvas."""
-    logo = img.crop(bbox)
-    scale = canvas_px * fraction / max(logo.size)
+    width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    scale = canvas_px * fraction / max(width, height)
+    # Feather the edges: the source background is a slight gradient, so a hard
+    # crop would leave a faintly visible rectangle against the flat colour. The
+    # feather lives in a band added around the logo, so it never fades the logo.
+    feather = max(2, round(min(width, height) * 0.06))
+    pad = 2 * feather
+    padded = Image.new("RGB", (img.width + 2 * pad, img.height + 2 * pad), bg)
+    padded.paste(img, (pad, pad))
+    logo = padded.crop((bbox[0], bbox[1], bbox[2] + 2 * pad, bbox[3] + 2 * pad))
     logo = logo.resize((max(1, round(logo.width * scale)), max(1, round(logo.height * scale))), Image.LANCZOS)
     canvas = Image.new("RGB", (canvas_px, canvas_px), bg)
-    # Feather the edges: the source background is a slight gradient, so a hard
-    # crop would leave a faintly visible rectangle against the flat colour.
-    margin = max(2, round(min(logo.size) * 0.12))
+    margin = max(1, round(feather * scale))
     mask = Image.new("L", logo.size, 0)
     ImageDraw.Draw(mask).rectangle((margin, margin, logo.width - margin, logo.height - margin), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(margin / 2))
@@ -118,7 +124,8 @@ def main():
 
         # Monochrome (themed icon): brightness above background becomes alpha
         gray = ImageChops.difference(fg, Image.new("RGB", fg.size, bg)).convert("L")
-        gray = gray.point(lambda v: min(255, v * 3))
+        # The first levels are the noise of the source background: keep them transparent.
+        gray = gray.point(lambda v: max(0, min(255, (v - 8) * 3)))
         mono = Image.new("RGBA", fg.size, (0, 0, 0, 255))
         mono.putalpha(gray)
         save(mono, folder / "ic_launcher_monochrome.png")
