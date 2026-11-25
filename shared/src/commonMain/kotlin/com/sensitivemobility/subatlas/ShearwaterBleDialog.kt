@@ -182,7 +182,7 @@ internal fun ShearwaterBleDialog(
                 summary = s.bleSummary(ShearwaterBleImport.computerName(modelId, serial), firmware)
 
                 progress = s.bleReadingList
-                val manifest = l.download(ShearwaterBle.MANIFEST_ADDRESS, ShearwaterBle.MANIFEST_SIZE, compression = false)
+                val manifest = l.manifest { n -> progress = "${s.bleReadingList} ($n)" }
                 ble.saveDump("manifest.bin", manifest)
                 val all = ShearwaterManifestEntry.parse(manifest).filter { it.valid }
                 entries.addAll(all)

@@ -219,16 +219,21 @@ chaque échange.
   (`0x80000000` pour le format natif) ; (3) l'en-tête de trame `[nombre, rang]` ne sert pas à reconstituer le paquet, la fin se
   reconnaît à l'octet `0xC0` ; (4) le débit est faible (environ 700 octets décompressés par seconde : une plongée d'une heure demande
   une quarantaine de secondes), donc on ne lit que les plongées nouvelles.
-- **Sommaire** : 48 entrées de 32 octets : `A5C4` (présente), heure de début (+4) et de fin (+8) en secondes depuis 1970 à l'heure de
-  l'ordinateur, durée en secondes (+12), profondeur max en dm (+16), numéro de journal (+18), adresses de début (+20) et de fin (+24).
+- **Sommaire** : des pages de 48 entrées de 32 octets, de la plus récente à la plus ancienne ; chaque nouvelle demande à la même adresse
+  donne la page suivante et la dernière est incomplète (`ShearwaterBle.manifest`, comme libdivecomputer). **Vérifié sur un Perdix AI** :
+  255 plongées lues, n° 1 à 255, de janvier 2017 à novembre 2026, sans doublon. Une entrée : `A5C4` (présente), heure de début (+4) et de
+  fin (+8) en secondes depuis 1970 à l'heure de l'ordinateur, durée en secondes (+12), profondeur max en dm (+16), numéro de journal (+18), adresses de début (+20) et de fin (+24).
 - **Vérifié sur un Peregrine TX (V104 Classic)** : la plongée convertie donne les mêmes valeurs que Shearwater Cloud (heures, 3620 s, max
   13,9 m, moyenne 9,7 m, 26,8 °C, air, 212 à 49 bar, 726 points identiques) ; la fusion avec la plongée du carnet n'a rien écrasé.
   La création d'une plongée nouvelle n'a été essayée que sur l'émulateur.
 - **Une bouteille par gaz** : la bouteille principale est le premier gaz respiré (avec ses pressions si l'émetteur était allumé) ; chaque
   autre mélange respiré (au moins 10 s, pour écarter un parasite) devient une bouteille sans pression, avec sa durée d'utilisation et sa
-  profondeur moyenne ; chaque gaz **configuré** dans l'ordinateur mais non respiré (liste de pourcentages d'O2 à partir de l'octet 20 de
-  l'enregistrement d'ouverture, cohérente avec les gaz respirés sur les 103 plongées de l'export Cloud) a aussi la sienne, sans usage
-  (son hélium n'est pas connu : 0). Un pony ou un bloc du même gaz, sans émetteur ni configuration, est invisible pour l'ordinateur : il
+  profondeur moyenne ; chaque gaz **activé** dans l'ordinateur mais non respiré a aussi la sienne, sans usage. L'ordinateur garde dix gaz
+  en mémoire (cinq en circuit ouvert, cinq diluants), désactivés compris : le masque des octets 17-18 de l'enregistrement d'ouverture
+  `0x14` dit lesquels sont activés (O2 à partir de l'octet 20 de `0x10`, hélium aux octets 30-31 de `0x10` puis 1 à 8 de `0x11`). Vu sur
+  un Perdix en recycleur (V102 Classic) : masque `0042`, soit le secours à 30 % et le diluant à l'air, au lieu de sept bouteilles. Rejoué sur les 103
+  journaux du Peregrine TX : mêmes bouteilles que l'ancienne règle sauf sur 2 plongées, où un 60 % désactivé dans l'ordinateur n'a plus
+  la sienne (les notes disent que le bloc était emporté : à ajouter à la main). Un pony ou un bloc du même gaz, sans émetteur ni configuration, est invisible pour l'ordinateur : il
   reste à saisir. La fusion avec une plongée du carnet associe les bouteilles **par gaz** (et non par rang) : une plongée saisie à la main
   avec ses bouteilles dans un autre ordre garde chaque volume ; la bouteille manquante est ajoutée. Une plongée déjà fusionnée de deux
   sources n'est pas modifiée. Le décodeur a été essayé sur les 103 plongées de l'export Shearwater Cloud (dont 5 à plusieurs gaz) :
@@ -258,31 +263,40 @@ changent : les données restent enregistrées en métrique (`Units.kt`, lu par t
 - **Import** : les exports Shearwater en unités impériales sont convertis à la lecture (déjà géré) ; non essayé sur un vrai fichier.
 
 ## Association d'un ordinateur de plongée (Android)
-Réglages > « Importer depuis un ordinateur de plongée » > **Peregrine** (`ComputerSettings.kt`, parcours voulu dans
-`docs/import-ordinateur-plongee.md`) :
-- **Associer un ordinateur de plongée** : la recherche Bluetooth démarre à l'ouverture de la fenêtre (le Peregrine doit avoir son Bluetooth
-  activé, Shearwater Cloud fermé) ; on touche le Peregrine dans la liste (seuls les appareils nommés « Peregrine » sont montrés, avec un
-  lien « Afficher tous les appareils Bluetooth »). L'appli s'y connecte pour lire son numéro de série, son modèle et son firmware (preuve
+Réglages > « Importer depuis un ordinateur de plongée » (`ComputerSettings.kt`, parcours voulu dans `docs/import-ordinateur-plongee.md`).
+Un seul ordinateur Shearwater associé à la fois ; la section, les boutons et les messages portent **le modèle lu dans l'appareil**
+(« Perdix AI », « Peregrine TX » ; modèle inconnu : son nom Bluetooth) :
+- **Associer un ordinateur de plongée** : la recherche Bluetooth démarre à l'ouverture de la fenêtre (l'ordinateur doit avoir son Bluetooth
+  activé, Shearwater Cloud fermé) ; on le touche dans la liste (seuls les ordinateurs Shearwater sont montrés, avec un lien « Afficher
+  tous les appareils Bluetooth »). L'appli s'y connecte pour lire son numéro de série, son modèle et son firmware (preuve
   que c'est un ordinateur Shearwater) puis **enregistre l'association** dans les réglages : `Settings.computers` (`DiveComputer` : adresse
   Bluetooth, nom, modèle, série, firmware, famille de protocole). La section affiche alors « Peregrine TX (977D8B42) · V104 Classic ».
-- **Dissocier le Peregrine** (avec confirmation) : efface l'enregistrement ; les plongées déjà importées sont conservées.
+  La recherche des nouvelles plongées **s'enchaîne sur la même connexion** : l'ordinateur n'en accepte qu'une par activation de son
+  Bluetooth (sur un Perdix, la fermer puis en rouvrir une donnait « ordinateur introuvable »). Quand aucune connexion n'aboutit, le
+  message invite à quitter puis réactiver le Bluetooth de l'ordinateur.
+- **Dissocier** (avec confirmation) : efface l'enregistrement ; les plongées déjà importées sont conservées.
 - Décision : la détection et l'import automatiques ne se feront **que lorsque SubAtlas est ouverte** (pas de service en arrière-plan).
-- **Détection (appli ouverte seulement)** : tant que SubAtlas est au premier plan et qu'un Peregrine est associé, l'appli guette son adresse
+- **Détection (appli ouverte seulement)** : tant que SubAtlas est au premier plan et qu'un ordinateur est associé, l'appli guette son adresse
   Bluetooth (`BleTransport.waitForDevice` : recherche filtrée sur l'adresse, mode équilibré, sans permission à redemander). Dès qu'il
   apparaît, `ComputerImport` (`ComputerImport.kt`) se connecte, lit le sommaire et ne garde que les **nouvelles plongées** (celles qui ne
   sont pas déjà dans le carnet). Il ne se redéclenche pas tant que l'ordinateur reste à portée : il faut qu'il disparaisse (Bluetooth
   coupé sur l'ordinateur) plus de 15 s, ou qu'on revienne dans l'appli plus de 5 min après le dernier import. La détection se met en
   pause pendant l'association et l'import manuel.
-- **Avec confirmation (par défaut)** : une fenêtre liste les nouvelles plongées (cochées), « Importer (N) » ou « Plus tard ». Aucune
+- **Avec confirmation (par défaut)** : une fenêtre liste les nouvelles plongées (cochées ; « Les nouvelles » et « Aucune »
+  cochent ou décochent tout), « Importer (N) » ou « Plus tard ». Aucune
   nouvelle plongée : message de 3 s. La connexion **reste ouverte** pendant la confirmation : après l'envoi de la liste, le Peregrine
   (« Liste envoyée ») attend les demandes de téléchargement sur cette connexion (une première version la fermait puis la rouvrait : le
   téléchargement échouait). En cas d'échec, la fenêtre propose « Partager le journal » des échanges.
 - **Case « Importer automatiquement les nouvelles plongées »** (par ordinateur, `DiveComputer.autoImport`) : sans confirmation ; une jauge
-  et un message indiquent le traitement (« Connexion au Peregrine… », « Lecture de la liste… », « Plongée 2 sur 3 · 40 % », « Ajout des
+  et un message indiquent le traitement (« Connexion au Perdix AI… », « Lecture de la liste… », « Plongée 2 sur 3 · 40 % », « Ajout des
   plongées au carnet… ») puis le résultat (« 3 plongées ajoutées, 1 fusionnée »). Une coupure en route ajoute tout de même les plongées déjà
   lues et affiche la cause ; les autres seront proposées la fois suivante.
 - **Importer les nouvelles plongées** : bouton de la section, même flux sans attendre la détection. Les plongées sont ajoutées par
   l'import habituel (fusion avec une plongée du carnet à la même heure, sinon plongée nouvelle, sans site à renseigner ensuite).
+- **Vérifié sur un Perdix AI (V102 Classic, 25 novembre 2026)** : détection, import avec confirmation de 10 plongées (date, heure, durée
+  et profondeur max identiques au sommaire de l'ordinateur) et lecture de la liste complète. La plus ancienne plongée (2017, version de
+  journal 13, **unités impériales**) est au même format et convertie en mètres et °C. Limite connue : la liste des plongées proposées
+  affiche sa profondeur en pieds comme des mètres (le sommaire ne passe pas par la conversion).
 - **Vérifié** : sur ton Peregrine TX, l'association (recherche, identité, enregistrement ; le Peregrine annonce son service Bluetooth
   Shearwater et son nom) ; sur l'émulateur, la section, la case, la fenêtre (connexion, erreur « ordinateur introuvable »), Dissocier.
   **Non vérifié** : la détection et l'import complet depuis cet écran avec un vrai Peregrine.

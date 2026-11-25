@@ -9,8 +9,11 @@ import kotlinx.coroutines.CancellationException
 internal class ShearwaterSession(
     private val ble: BleTransport,
     val address: String,
-    private val log: (String) -> Unit = { println("SubAtlas BLE : $it") },
+    /** Le journal des échanges ; il change quand une session ouverte à l'association passe à l'import. */
+    var log: (String) -> Unit = { println("SubAtlas BLE : $it") },
 ) {
+    private fun note(line: String) = log(line)
+
     var serial = ""
         private set
     var firmware = ""
@@ -23,9 +26,9 @@ internal class ShearwaterSession(
 
     /** Se connecte et lit l'identité de l'ordinateur et la base des adresses de son carnet. Lève une exception en cas d'échec. */
     suspend fun open() {
-        val c = ble.connect(address, log)
+        val c = ble.connect(address, ::note)
         connection = c
-        val l = ShearwaterBle(c, log)
+        val l = ShearwaterBle(c, ::note)
         link = l
         serial = l.read(0x8010).decodeToString().trim()
         firmware = optional { l.read(0x8011).decodeToString().trim() }.orEmpty()
@@ -44,8 +47,8 @@ internal class ShearwaterSession(
     }
 
     /** Les plongées présentes dans le sommaire de l'ordinateur, de la plus récente à la plus ancienne. */
-    suspend fun manifest(): List<ShearwaterManifestEntry> {
-        val raw = (link ?: error("session fermée")).download(ShearwaterBle.MANIFEST_ADDRESS, ShearwaterBle.MANIFEST_SIZE, compression = false)
+    suspend fun manifest(progress: (Int) -> Unit = {}): List<ShearwaterManifestEntry> {
+        val raw = (link ?: error("session fermée")).manifest(progress)
         ble.saveDump("manifest.bin", raw)
         return ShearwaterManifestEntry.parse(raw).filter { it.valid }
     }

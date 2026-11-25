@@ -32,7 +32,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
- * Réglages > « Importer depuis un ordinateur de plongée » : l'association d'un ordinateur (Peregrine) à l'appli. Une fois associé, l'appli
+ * Réglages > « Importer depuis un ordinateur de plongée » : l'association d'un ordinateur Shearwater à l'appli, nommé d'après son modèle. Une fois associé, l'appli
  * connaît son adresse Bluetooth et n'a plus à le chercher parmi tous les appareils. « Dissocier » efface l'association.
  * Parcours voulu : docs/import-ordinateur-plongee.md.
  */
@@ -42,7 +42,7 @@ internal fun ComputersSection(state: AppState, actions: PlatformActions, importe
     val s = LocalStrings.current
     var associating by remember { mutableStateOf(false) }
     var forgetting by remember { mutableStateOf(false) }
-    val peregrine = state.settings.computers.firstOrNull { it.family == DiveComputer.SHEARWATER }
+    val paired = state.settings.computers.firstOrNull { it.family == DiveComputer.SHEARWATER }
 
     Text(
         s.computersSection,
@@ -51,50 +51,52 @@ internal fun ComputersSection(state: AppState, actions: PlatformActions, importe
         modifier = Modifier.padding(top = 8.dp),
     )
     Text(s.computersHint, style = MaterialTheme.typography.bodyMedium)
-    Text(s.peregrineTitle, style = MaterialTheme.typography.titleMedium)
-    if (peregrine == null) {
+    if (paired == null) {
         Text(s.computerNone, style = MaterialTheme.typography.bodyMedium)
         OutlinedButton(onClick = { associating = true }, modifier = Modifier.fillMaxWidth()) { Text(s.computerAssociate) }
     } else {
-        Text(peregrine.label(), style = MaterialTheme.typography.bodyLarge)
+        Text(paired.displayName, style = MaterialTheme.typography.titleMedium)
+        Text(paired.label(), style = MaterialTheme.typography.bodyLarge)
         Text(s.computerAssociated, style = MaterialTheme.typography.bodySmall)
         // Import automatique : sans demander de confirmation, avec une jauge et des messages.
         Row(
             Modifier.fillMaxWidth().clickable {
-                state.updateSettings { it.copy(computers = it.computers.map { c -> if (c.address == peregrine.address) c.copy(autoImport = !c.autoImport) else c }) }
+                state.updateSettings { it.copy(computers = it.computers.map { c -> if (c.address == paired.address) c.copy(autoImport = !c.autoImport) else c }) }
             },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(checked = peregrine.autoImport, onCheckedChange = null)
+            Checkbox(checked = paired.autoImport, onCheckedChange = null)
             Column(Modifier.padding(start = 8.dp)) {
                 Text(s.computerAuto, style = MaterialTheme.typography.bodyLarge)
                 Text(s.computerAutoHint, style = MaterialTheme.typography.bodySmall)
             }
         }
-        Text(s.computerDetectHint, style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { importer.start(peregrine) }, enabled = importer.idle, modifier = Modifier.fillMaxWidth()) { Text(s.computerImportNow) }
-        OutlinedButton(onClick = { forgetting = true }, modifier = Modifier.fillMaxWidth()) { Text(s.computerForget) }
+        Text(s.computerDetectHint(paired.displayName), style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { importer.start(paired) }, enabled = importer.idle, modifier = Modifier.fillMaxWidth()) { Text(s.computerImportNow) }
+        OutlinedButton(onClick = { forgetting = true }, modifier = Modifier.fillMaxWidth()) { Text(s.computerForget(paired.displayName)) }
     }
 
     if (associating) {
         AssociateDialog(
             ble,
-            onAssociated = { computer ->
-                // Un seul Peregrine associé : une nouvelle association remplace l'ancienne.
+            onAssociated = { computer, session, log ->
+                // Un seul ordinateur Shearwater associé : une nouvelle association remplace l'ancienne.
                 state.updateSettings { it.copy(computers = it.computers.filter { c -> c.family != computer.family } + computer) }
                 associating = false
+                // L'import s'enchaîne sur la même connexion : une fois coupée, l'ordinateur ne répond plus avant réactivation.
+                importer.start(computer, session, log)
             },
             onDismiss = { associating = false },
         )
     }
-    if (forgetting && peregrine != null) {
+    if (forgetting && paired != null) {
         AlertDialog(
             onDismissRequest = { forgetting = false },
-            title = { Text(s.computerForgetTitle) },
-            text = { Text(s.computerForgetMessage(peregrine.label())) },
+            title = { Text(s.computerForgetTitle(paired.displayName)) },
+            text = { Text(s.computerForgetMessage(paired.label())) },
             confirmButton = {
                 TextButton(onClick = {
-                    state.updateSettings { it.copy(computers = it.computers.filter { c -> c.address != peregrine.address }) }
+                    state.updateSettings { it.copy(computers = it.computers.filter { c -> c.address != paired.address }) }
                     forgetting = false
                 }) { Text(s.computerForgetConfirm, color = MaterialTheme.colorScheme.error) }
             },
@@ -104,11 +106,16 @@ internal fun ComputersSection(state: AppState, actions: PlatformActions, importe
 }
 
 /**
- * Cherche les Peregrine à portée, puis, quand on en touche un, s'y connecte pour lire son numéro de série, son modèle et son firmware
- * (preuve que c'est bien un ordinateur Shearwater) avant d'enregistrer l'association.
+ * Cherche les ordinateurs Shearwater à portée, puis, quand on en touche un, s'y connecte pour lire son numéro de série, son modèle et son firmware
+ * (preuve que c'est bien un ordinateur Shearwater) avant d'enregistrer l'association. La session reste ouverte : [onAssociated] la
+ * reçoit, avec son journal, et doit s'en servir ou la fermer.
  */
 @Composable
-private fun AssociateDialog(ble: BleTransport, onAssociated: (DiveComputer) -> Unit, onDismiss: () -> Unit) {
+private fun AssociateDialog(
+    ble: BleTransport,
+    onAssociated: (DiveComputer, ShearwaterSession, List<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val s = LocalStrings.current
     HoldComputerLock()
     val scope = rememberCoroutineScope()
@@ -118,9 +125,10 @@ private fun AssociateDialog(ble: BleTransport, onAssociated: (DiveComputer) -> U
     var checking by remember { mutableStateOf(false) }
     var showAll by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var connection by remember { mutableStateOf<BleConnection?>(null) }
+    // La session en cours de vérification : fermée avec la fenêtre, sauf si elle a été remise à l'import.
+    var pending by remember { mutableStateOf<ShearwaterSession?>(null) }
 
-    DisposableEffect(Unit) { onDispose { connection?.close() } }
+    DisposableEffect(Unit) { onDispose { pending?.close() } }
 
     fun scan() {
         scope.launch {
@@ -149,29 +157,28 @@ private fun AssociateDialog(ble: BleTransport, onAssociated: (DiveComputer) -> U
             checking = true
             error = null
             try {
-                val c = ble.connect(device.address) { println("SubAtlas BLE : $it") }
-                connection = c
-                val link = ShearwaterBle(c) { println("SubAtlas BLE : $it") }
-                val serial = link.read(0x8010).decodeToString().trim()
-                val firmware = runCatching { link.read(0x8011).decodeToString().trim() }.getOrDefault("")
-                val modelId = runCatching { link.read(0x8060).firstOrNull()?.toInt()?.and(0xFF) }.getOrNull()
-                c.close()
-                connection = null
+                val log = ArrayList<String>()
+                val session = ShearwaterSession(ble, device.address) { println("SubAtlas BLE : $it"); log += it }
+                pending = session
+                session.open()
+                pending = null
                 onAssociated(
                     DiveComputer(
                         address = device.address,
                         name = device.name,
-                        model = ShearwaterBleImport.modelName(modelId),
-                        serial = serial,
-                        firmware = firmware,
+                        model = ShearwaterBleImport.modelName(session.modelId),
+                        serial = session.serial,
+                        firmware = session.firmware,
                         family = DiveComputer.SHEARWATER,
                     ),
+                    session,
+                    log,
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                connection?.close()
-                connection = null
+                pending?.close()
+                pending = null
                 error = s.computerAssociateFailed(e.message.orEmpty())
             } finally {
                 checking = false

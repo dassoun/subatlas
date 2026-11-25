@@ -66,6 +66,27 @@ internal object ShearwaterBleImport {
         }
     }
 
+    /**
+     * Les gaz activés dans l'ordinateur (% d'O2 et d'hélium). Il en garde dix en mémoire, cinq en circuit ouvert puis cinq diluants de
+     * recycleur, y compris ceux qui sont désactivés : seul le masque des octets 17-18 de l'enregistrement d'ouverture `0x14` dit lesquels
+     * servent (bit 0 : le premier). L'O2 est à partir de l'octet 20 de l'enregistrement `0x10` ; l'hélium des deux premiers gaz à ses
+     * octets 30-31, celui des huit autres à partir de l'octet 1 de l'enregistrement `0x11`.
+     */
+    private fun enabledGases(raw: ByteArray): List<Pair<Int, Int>> {
+        fun record(type: Int): Int? =
+            (0..raw.size - ShearwaterBle.RECORD_SIZE step ShearwaterBle.RECORD_SIZE).firstOrNull { (raw[it].toInt() and 0xFF) == type }
+        fun byte(p: Int) = raw[p].toInt() and 0xFF
+        val first = record(0x10) ?: return emptyList()
+        val second = record(0x11) ?: return emptyList()
+        val flags = record(0x14) ?: return emptyList()
+        val mask = (byte(flags + 17) shl 8) or byte(flags + 18)
+        return (0 until 10).filter { mask and (1 shl it) != 0 }.mapNotNull { k ->
+            val o2 = byte(first + 20 + k)
+            val he = if (k < 2) byte(first + 30 + k) else byte(second + k - 1)
+            (o2 to he).takeIf { o2 in 5..100 && o2 + he <= 100 }
+        }
+    }
+
     /** Convertit une plongée téléchargée (enregistrements décompressés) ; `null` si elle ne contient pas d'échantillons. */
     fun toDive(entry: ShearwaterManifestEntry, raw: ByteArray, serial: String, modelId: Int?): ShearwaterDive? {
         if (raw.size < ShearwaterBle.RECORD_SIZE) return null
@@ -96,9 +117,8 @@ internal object ShearwaterBleImport {
         // Bouteilles : une par gaz. Les mélanges respirés (octets 8 et 9 de chaque échantillon : % d'O2 et d'hélium), dans l'ordre où ils servent :
         // le premier est celui de la bouteille équipée de l'émetteur (pression de début et de fin si l'émetteur était allumé : octets 28-29, en
         // demi-PSI, 0xFFF0 et plus : absent), les suivants (bouteille de déco, relais) n'ont pas de pression mais leur durée d'utilisation et
-        // leur profondeur moyenne. Un mélange respiré moins de 10 s est un parasite, pas une bouteille. S'y ajoutent les gaz configurés dans
-        // l'ordinateur (liste de pourcentages d'O2 à partir de l'octet 20 de l'enregistrement d'ouverture) qui n'ont pas été respirés : une
-        // bouteille de déco emportée mais pas utilisée a aussi sa bouteille (l'hélium d'un gaz configuré n'est pas connu : 0).
+        // leur profondeur moyenne. Un mélange respiré moins de 10 s est un parasite, pas une bouteille. S'y ajoutent les gaz **activés** dans
+        // l'ordinateur qui n'ont pas été respirés : une bouteille de déco ou de secours emportée mais pas utilisée a aussi sa bouteille.
         fun pressureBar(i: Int): Int? = u16(samples[i] + 28).takeIf { it in 1 until 0xFFF0 }?.let { round(it * 2 * PSI_TO_BAR).toInt() }
         class Use(var samples: Int = 0, var depthSum: Double = 0.0)
         val uses = LinkedHashMap<Pair<Int, Int>, Use>()
@@ -110,14 +130,7 @@ internal object ShearwaterBleImport {
             use.depthSum += depthM(i)
         }
         val mixes = uses.entries.filter { it.value.samples * interval >= 10 }.map { it.key }
-        val configured = ArrayList<Int>()
-        for (k in 20 until 30) {
-            val v = raw[k].toInt() and 0xFF
-            if (v == 0) break
-            if (v !in 5..100) { configured.clear(); break }
-            configured += v
-        }
-        val unused = configured.filter { o2 -> mixes.none { it.first == o2 } }.distinct().map { it to 0 }
+        val unused = enabledGases(raw).filter { it !in mixes }.distinct()
         val firstPressure = immersed.firstNotNullOfOrNull { pressureBar(it) }
         val lastPressure = immersed.reversed().firstNotNullOfOrNull { pressureBar(it) }
         val tanks = (mixes.ifEmpty { listOf(21 to 0) }).mapIndexed { i, mix ->

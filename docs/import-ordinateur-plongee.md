@@ -32,6 +32,11 @@ de plongée (voir « Autres modèles »).
   comme dans la fenêtre actuelle) : coupure = message clair, pas de reprise automatique (le Peregrine cesse de transmettre dès que la
   liaison est coupée).
 - **Un seul client à la fois** : l'ordinateur ne parle qu'à une appli ; Shearwater Cloud doit être fermé. Le dire dans l'interface.
+- **Une connexion par activation du Bluetooth** (vu le 25 novembre 2026 sur un Perdix, V102 Classic) : après une coupure, même propre,
+  l'ordinateur ne se signale plus et la connexion suivante échoue (« ordinateur introuvable ») tant que son Bluetooth n'est pas quitté
+  puis réactivé. L'association **enchaîne donc l'import sur sa propre connexion**, sans la fermer.
+- **Noms selon l'appareil** (demandé le 25 novembre 2026) : la section et les messages portent le modèle de l'ordinateur connecté
+  (`DiveComputer.displayName`), jamais un modèle écrit en dur. Une seule section sert à tous les Shearwater.
 - **Écran allumé** pendant un téléchargement (`PlatformActions.setKeepScreenOn`, déjà en place).
 - Tout fichier ou donnée qui modifie le carnet demande confirmation, **sauf** quand la case d'import automatique est cochée (c'est son objet).
 
@@ -57,7 +62,7 @@ l'adresse) tant qu'elle est au premier plan, et propose l'import dès que le Per
 
 ## Autres modèles d'ordinateurs
 
-Quand l'utilisateur demandera l'import Bluetooth d'un autre modèle (Mares Sirius, Perdix, Teric, etc.), **suivre ce même parcours** : une
+Quand l'utilisateur demandera l'import Bluetooth d'un autre modèle (Mares Sirius, etc. ; les Shearwater, dont le Perdix, passent déjà par la même section), **suivre ce même parcours** : une
 nouvelle section de modèle sous « Importer depuis un ordinateur de plongée », avec Associer / Dissocier / import automatique. Ce que
 chaque modèle apporte (le reste est commun) :
 

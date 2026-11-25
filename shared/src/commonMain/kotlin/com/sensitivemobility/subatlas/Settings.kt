@@ -57,6 +57,9 @@ data class DiveComputer(
     /** Importer les nouvelles plongées sans demander de confirmation quand l'ordinateur est détecté. */
     val autoImport: Boolean = false,
 ) {
+    /** Le nom employé dans les écrans : le modèle lu dans l'appareil, sinon son nom Bluetooth (modèle inconnu). */
+    val displayName: String get() = model.takeIf { it.isNotBlank() && it != "Shearwater" } ?: name.ifBlank { "Shearwater" }
+
     /** « Peregrine TX (977D8B42) · V104 Classic ». */
     fun label(): String = listOf("$model${serial.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()}", firmware.takeIf { it.isNotBlank() })
         .filterNotNull().joinToString(" · ")

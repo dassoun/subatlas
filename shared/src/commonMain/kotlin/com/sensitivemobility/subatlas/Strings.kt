@@ -198,12 +198,11 @@ interface Strings {
     val bleKeepScreen: String
     val computersSection: String
     val computersHint: String
-    val peregrineTitle: String
     val computerNone: String
     val computerAssociate: String
     val computerAssociated: String
-    val computerForget: String
-    val computerForgetTitle: String
+    fun computerForget(name: String): String
+    fun computerForgetTitle(name: String): String
     fun computerForgetMessage(label: String): String
     val computerForgetConfirm: String
     val associateTitle: String
@@ -214,16 +213,17 @@ interface Strings {
     fun associateSeen(n: Int): String
     val computerAuto: String
     val computerAutoHint: String
-    val computerDetectHint: String
+    fun computerDetectHint(name: String): String
     val computerImportNow: String
-    val computerImportConnecting: String
+    fun computerImportConnecting(name: String): String
     val computerImportReading: String
     val computerImportApplying: String
-    val computerImportNone: String
-    fun computerImportFound(n: Int): String
+    fun computerImportNone(name: String): String
+    fun computerImportFound(n: Int, name: String): String
     fun computerImportAction(n: Int): String
     val computerImportLater: String
     fun computerImportFailed(detail: String): String
+    val computerImportRestartHint: String
     fun computerAssociateFailed(detail: String): String
     fun bleLost(detail: String): String
     val bleRestart: String
@@ -689,32 +689,32 @@ object FrStrings : Strings {
     override val bleKeepScreen = "Gardez l'écran allumé et l'ordinateur à portée pendant le téléchargement."
     override val computersSection = "Importer depuis un ordinateur de plongée"
     override val computersHint = "Associez votre ordinateur de plongée : SubAtlas le retrouvera sans nouvelle recherche parmi les appareils Bluetooth."
-    override val peregrineTitle = "Peregrine"
-    override val computerNone = "Aucun Peregrine associé."
+    override val computerNone = "Aucun ordinateur associé."
     override val computerAssociate = "Associer un ordinateur de plongée"
     override val computerAssociated = "Associé : SubAtlas le reconnaît par son adresse Bluetooth."
-    override val computerForget = "Dissocier le Peregrine"
-    override val computerForgetTitle = "Dissocier le Peregrine ?"
+    override fun computerForget(name: String) = "Dissocier le $name"
+    override fun computerForgetTitle(name: String) = "Dissocier le $name ?"
     override fun computerForgetMessage(label: String) = "L'association avec $label sera effacée. Les plongées déjà importées sont conservées ; il faudra associer à nouveau l'ordinateur pour le retrouver sans recherche."
     override val computerForgetConfirm = "Dissocier"
-    override val associateTitle = "Associer un Peregrine"
-    override val associateIntro = "Activez le Bluetooth sur le Peregrine et fermez Shearwater Cloud, puis touchez votre ordinateur dans la liste."
+    override val associateTitle = "Associer un ordinateur"
+    override val associateIntro = "Activez le Bluetooth sur l'ordinateur et fermez Shearwater Cloud, puis touchez votre ordinateur dans la liste."
     override val associateChecking = "Vérification de l'ordinateur…"
-    override val associateNone = "Aucun Peregrine trouvé. Vérifiez que son Bluetooth est activé et qu'il est à portée, puis recherchez à nouveau."
+    override val associateNone = "Aucun ordinateur Shearwater trouvé. Vérifiez que son Bluetooth est activé et qu'il est à portée, puis recherchez à nouveau."
     override val associateShowAll = "Afficher tous les appareils Bluetooth"
     override val computerAuto = "Importer automatiquement les nouvelles plongées"
     override val computerAutoHint = "Sans demander de confirmation : une jauge et un message indiquent le traitement en cours."
-    override val computerDetectHint = "Quand SubAtlas est ouverte et que vous activez le Bluetooth du Peregrine, l'appli le détecte et propose d'importer ses nouvelles plongées."
+    override fun computerDetectHint(name: String) = "Quand SubAtlas est ouverte et que vous activez le Bluetooth du $name, l'appli le détecte et propose d'importer ses nouvelles plongées."
     override val computerImportNow = "Importer les nouvelles plongées"
-    override val computerImportConnecting = "Connexion au Peregrine…"
+    override fun computerImportConnecting(name: String) = "Connexion au $name…"
     override val computerImportReading = "Lecture de la liste des plongées…"
     override val computerImportApplying = "Ajout des plongées au carnet…"
-    override val computerImportNone = "Aucune nouvelle plongée sur le Peregrine."
-    override fun computerImportFound(n: Int) = "$n nouvelle${if (n > 1) "s" else ""} plongée${if (n > 1) "s" else ""} sur le Peregrine :"
+    override fun computerImportNone(name: String) = "Aucune nouvelle plongée sur le $name."
+    override fun computerImportFound(n: Int, name: String) = "$n nouvelle${if (n > 1) "s" else ""} plongée${if (n > 1) "s" else ""} sur le $name :"
     override fun computerImportAction(n: Int) = "Importer ($n)"
     override val computerImportLater = "Plus tard"
     override fun computerImportFailed(detail: String) = "Import interrompu ($detail)."
-    override fun associateSeen(n: Int) = if (n == 0) "Aucun appareil Bluetooth vu : vérifiez que le Bluetooth et la localisation du téléphone sont activés." else "$n appareil${if (n > 1) "s" else ""} Bluetooth vu${if (n > 1) "s" else ""}, aucun n'est reconnu comme un Peregrine."
+    override val computerImportRestartHint = "Sur l'ordinateur, quittez le mode Bluetooth, réactivez-le, puis réessayez."
+    override fun associateSeen(n: Int) = if (n == 0) "Aucun appareil Bluetooth vu : vérifiez que le Bluetooth et la localisation du téléphone sont activés." else "$n appareil${if (n > 1) "s" else ""} Bluetooth vu${if (n > 1) "s" else ""}, aucun n'est reconnu comme un ordinateur Shearwater."
     override fun computerAssociateFailed(detail: String) = "Cet appareil n'a pas répondu comme un ordinateur Shearwater ($detail)."
     override fun bleLost(detail: String) = "Connexion interrompue ($detail). L'ordinateur arrête de transmettre dès que la liaison est coupée : rapprochez-le, rallumez son Bluetooth si besoin, puis touchez « Recommencer ». Les plongées déjà lues peuvent être importées."
     override val bleRestart = "Recommencer"
@@ -1275,32 +1275,32 @@ object EnStrings : Strings {
     override val bleKeepScreen = "Keep the screen on and the computer within reach during the download."
     override val computersSection = "Import from a dive computer"
     override val computersHint = "Pair your dive computer: SubAtlas will find it again without searching through all Bluetooth devices."
-    override val peregrineTitle = "Peregrine"
-    override val computerNone = "No Peregrine paired."
+    override val computerNone = "No computer paired."
     override val computerAssociate = "Pair a dive computer"
     override val computerAssociated = "Paired: SubAtlas recognises it by its Bluetooth address."
-    override val computerForget = "Unpair the Peregrine"
-    override val computerForgetTitle = "Unpair the Peregrine?"
+    override fun computerForget(name: String) = "Unpair the $name"
+    override fun computerForgetTitle(name: String) = "Unpair the $name?"
     override fun computerForgetMessage(label: String) = "The pairing with $label will be erased. Dives already imported are kept; you will need to pair the computer again to find it without searching."
     override val computerForgetConfirm = "Unpair"
-    override val associateTitle = "Pair a Peregrine"
-    override val associateIntro = "Turn on the Peregrine's Bluetooth and close Shearwater Cloud, then tap your computer in the list."
+    override val associateTitle = "Pair a computer"
+    override val associateIntro = "Turn on the computer's Bluetooth and close Shearwater Cloud, then tap your computer in the list."
     override val associateChecking = "Checking the computer…"
-    override val associateNone = "No Peregrine found. Check that its Bluetooth is on and that it is within range, then search again."
+    override val associateNone = "No Shearwater computer found. Check that its Bluetooth is on and that it is within range, then search again."
     override val associateShowAll = "Show all Bluetooth devices"
     override val computerAuto = "Import new dives automatically"
     override val computerAutoHint = "Without asking for confirmation: a gauge and a message show what is being processed."
-    override val computerDetectHint = "When SubAtlas is open and you turn on the Peregrine's Bluetooth, the app detects it and offers to import its new dives."
+    override fun computerDetectHint(name: String) = "When SubAtlas is open and you turn on the Bluetooth of the $name, the app detects it and offers to import its new dives."
     override val computerImportNow = "Import new dives"
-    override val computerImportConnecting = "Connecting to the Peregrine…"
+    override fun computerImportConnecting(name: String) = "Connecting to the $name…"
     override val computerImportReading = "Reading the dive list…"
     override val computerImportApplying = "Adding the dives to the logbook…"
-    override val computerImportNone = "No new dive on the Peregrine."
-    override fun computerImportFound(n: Int) = "$n new dive${if (n != 1) "s" else ""} on the Peregrine:"
+    override fun computerImportNone(name: String) = "No new dive on the $name."
+    override fun computerImportFound(n: Int, name: String) = "$n new dive${if (n != 1) "s" else ""} on the $name:"
     override fun computerImportAction(n: Int) = "Import ($n)"
     override val computerImportLater = "Later"
     override fun computerImportFailed(detail: String) = "Import interrupted ($detail)."
-    override fun associateSeen(n: Int) = if (n == 0) "No Bluetooth device seen: check that the phone's Bluetooth and location are on." else "$n Bluetooth device${if (n != 1) "s" else ""} seen, none recognised as a Peregrine."
+    override val computerImportRestartHint = "On the computer, leave Bluetooth mode, turn it on again, then retry."
+    override fun associateSeen(n: Int) = if (n == 0) "No Bluetooth device seen: check that the phone's Bluetooth and location are on." else "$n Bluetooth device${if (n != 1) "s" else ""} seen, none recognised as a Shearwater computer."
     override fun computerAssociateFailed(detail: String) = "This device did not answer like a Shearwater computer ($detail)."
     override fun bleLost(detail: String) = "Connection lost ($detail). The computer stops transmitting as soon as the link is cut: bring it closer, turn its Bluetooth back on if needed, then tap “Start over”. The dives already read can be imported."
     override val bleRestart = "Start over"

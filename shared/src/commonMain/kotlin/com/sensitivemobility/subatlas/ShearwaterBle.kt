@@ -147,6 +147,27 @@ internal class ShearwaterBle(private val conn: BleConnection, private val log: (
         return raw.toByteArray().copyOf(size)
     }
 
+    /**
+     * Le sommaire complet. L'ordinateur l'envoie par pages de 48 entrées, de la plus récente à la plus ancienne : chaque demande à la
+     * même adresse donne la page suivante, et la dernière est incomplète (comme `shearwater_petrel_device_foreach` de libdivecomputer).
+     * Ne garde que les entrées (présentes ou effacées) ; [progress] reçoit le nombre de plongées présentes déjà listées.
+     */
+    suspend fun manifest(progress: (Int) -> Unit = {}): ByteArray {
+        var all = ByteArray(0)
+        var previous: ByteArray? = null
+        for (page in 1..MANIFEST_MAX_PAGES) {
+            val data = download(MANIFEST_ADDRESS, MANIFEST_SIZE, compression = false)
+            // Un appareil qui redonnerait la même page ne doit pas faire tourner la lecture en rond.
+            if (previous?.contentEquals(data) == true) break
+            val count = ShearwaterManifestEntry.count(data)
+            all += data.copyOf(count * RECORD_SIZE)
+            progress(ShearwaterManifestEntry.parse(all).count { it.valid })
+            if (count < MANIFEST_SIZE / RECORD_SIZE) break
+            previous = data
+        }
+        return all
+    }
+
     /** Décodeur du flux compressé : valeurs de 9 bits, bit 0x100 = octet littéral, sinon nombre d'octets à zéro (0 = fin). */
     private class LreDecoder {
         private val out = ArrayList<Byte>()
@@ -192,6 +213,8 @@ internal class ShearwaterBle(private val conn: BleConnection, private val log: (
 
         const val MANIFEST_ADDRESS = 0xE0000000L
         const val MANIFEST_SIZE = 0x600
+        /** Garde-fou : bien plus de pages que la mémoire d'un ordinateur n'en contient. */
+        private const val MANIFEST_MAX_PAGES = 100
         const val RECORD_SIZE = 0x20
         const val DIVE_MAX_SIZE = 0xFFFFFF
 
@@ -234,6 +257,12 @@ internal class ShearwaterManifestEntry(val index: Int, val raw: ByteArray) {
     val endAddress: Long get() = u32(24)
 
     companion object {
+        /** Le nombre d'entrées (présentes ou effacées) au début d'une page du sommaire. */
+        fun count(page: ByteArray): Int = (0 until page.size / ShearwaterBle.RECORD_SIZE).takeWhile {
+            val e = ShearwaterManifestEntry(it, page.copyOfRange(it * ShearwaterBle.RECORD_SIZE, (it + 1) * ShearwaterBle.RECORD_SIZE))
+            e.valid || e.deleted
+        }.size
+
         fun parse(manifest: ByteArray): List<ShearwaterManifestEntry> =
             (0 until manifest.size / ShearwaterBle.RECORD_SIZE).map {
                 ShearwaterManifestEntry(it, manifest.copyOfRange(it * ShearwaterBle.RECORD_SIZE, (it + 1) * ShearwaterBle.RECORD_SIZE))

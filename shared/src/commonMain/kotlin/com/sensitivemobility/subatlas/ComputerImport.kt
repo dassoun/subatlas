@@ -92,33 +92,44 @@ internal class ComputerImport(
 
     val idle: Boolean get() = stage == Stage.IDLE
 
-    /** Lance la recherche des nouvelles plongées de [c] (détection de l'ordinateur ou bouton). Sans effet si un import est en cours. */
-    fun start(c: DiveComputer) {
-        val ble = actions.ble ?: return
-        if (stage != Stage.IDLE) return
+    /**
+     * Lance la recherche des nouvelles plongées de [c] (détection de l'ordinateur, bouton ou association). Sans effet si un import est en
+     * cours. [opened] est la session de l'association, déjà connectée ([openedLog] : ce qu'elle a journalisé) : l'ordinateur n'accepte
+     * qu'une connexion par activation de son Bluetooth, il ne faut donc pas la fermer pour en rouvrir une.
+     */
+    fun start(c: DiveComputer, opened: ShearwaterSession? = null, openedLog: List<String> = emptyList()) {
+        val ble = actions.ble
+        if (ble == null || stage != Stage.IDLE) {
+            opened?.close()
+            return
+        }
         computer = c
-        title = c.model.ifBlank { c.name }
-        stage = Stage.CONNECTING
-        progress = strings().computerImportConnecting
+        title = c.displayName
+        stage = if (opened == null) Stage.CONNECTING else Stage.READING
+        progress = if (opened == null) strings().computerImportConnecting(c.displayName) else strings().computerImportReading
         fraction = null
         message = ""
         fresh.clear()
         selected.clear()
         journal.clear()
+        journal.addAll(openedLog)
+        val s = opened ?: ShearwaterSession(ble, c.address)
+        s.log = ::note
+        session = s
         job = scope.launch {
-            val s = ShearwaterSession(ble, c.address) { note(it) }
-            session = s
             actions.setKeepScreenOn(true)
             try {
-                s.open()
-                stage = Stage.READING
-                progress = strings().computerImportReading
-                val entries = s.manifest()
+                if (opened == null) {
+                    s.open()
+                    stage = Stage.READING
+                    progress = strings().computerImportReading
+                }
+                val entries = s.manifest { n -> progress = "${strings().computerImportReading} ($n)" }
                 val news = s.fresh(entries, state.dives.toList())
                 when {
                     news.isEmpty() -> {
                         s.close()
-                        finish(Stage.NONE, strings().computerImportNone)
+                        finish(Stage.NONE, strings().computerImportNone(c.displayName))
                     }
                     c.autoImport -> downloadAndApply(s, news)
                     else -> {
@@ -133,7 +144,9 @@ internal class ComputerImport(
                 throw e
             } catch (e: Exception) {
                 s.close()
-                finish(Stage.FAILED, strings().computerImportFailed(describeBleFailure(e)), failed = true)
+                // Pas de connexion du tout : le plus souvent, l'ordinateur a déjà servi sa connexion et attend d'être réactivé.
+                val hint = if (stage == Stage.CONNECTING) " ${strings().computerImportRestartHint}" else ""
+                finish(Stage.FAILED, strings().computerImportFailed(describeBleFailure(e)) + hint, failed = true)
             }
         }
     }
@@ -196,7 +209,7 @@ internal class ComputerImport(
         if (failure != null) {
             finish(Stage.FAILED, strings().computerImportFailed(failure) + if (text.isNotEmpty()) " $text" else "", failed = true)
         } else {
-            finish(Stage.DONE, text.ifEmpty { strings().computerImportNone })
+            finish(Stage.DONE, text.ifEmpty { strings().computerImportNone(title) })
         }
     }
 
@@ -301,7 +314,12 @@ internal fun ComputerImportDialog(importer: ComputerImport) {
                         if (stage == ComputerImport.Stage.DOWNLOADING) Text(s.bleKeepScreen, style = MaterialTheme.typography.bodySmall)
                     }
                     stage == ComputerImport.Stage.CONFIRM -> {
-                        Text(s.computerImportFound(importer.fresh.size), style = MaterialTheme.typography.bodyMedium)
+                        Text(s.computerImportFound(importer.fresh.size, importer.title), style = MaterialTheme.typography.bodyMedium)
+                        // La liste peut compter des centaines de plongées : tout cocher ou tout décocher d'un coup.
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { importer.selected.clear(); importer.selected.addAll(importer.fresh.map { it.index }) }) { Text(s.bleSelectNew) }
+                            TextButton(onClick = { importer.selected.clear() }) { Text(s.bleSelectNone) }
+                        }
                         for (e in importer.fresh) {
                             val (date, time) = ShearwaterBleImport.dateTime(e.fingerprint)
                             Row(
