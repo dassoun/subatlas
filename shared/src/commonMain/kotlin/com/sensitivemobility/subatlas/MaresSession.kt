@@ -5,6 +5,7 @@ import kotlin.math.abs
 /** Les ordinateurs Mares de la famille « Sirius » (Sirius, Quad Ci, Puck 4…). */
 internal object MaresDriver : ComputerDriver {
     override val family = DiveComputer.MARES
+    override val hidesAfterConnection = false
 
     /** Le service Bluetooth de Mares, ou le nom « Sirius ». */
     override fun recognizes(device: BleFound): Boolean =

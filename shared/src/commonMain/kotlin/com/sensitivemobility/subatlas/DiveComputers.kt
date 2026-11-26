@@ -49,6 +49,12 @@ internal interface ComputerDriver {
     /** Identifiant enregistré avec l'association ([DiveComputer.family]). */
     val family: String
 
+    /**
+     * L'ordinateur cesse-t-il de s'annoncer une fois qu'on s'y est connecté, jusqu'à ce qu'on réactive son Bluetooth ? Alors toute
+     * nouvelle apparition après un import est voulue ; sinon la détection attend d'abord qu'il disparaisse.
+     */
+    val hidesAfterConnection: Boolean
+
     /** L'appareil vu à la recherche est-il de cette marque ? */
     fun recognizes(device: BleFound): Boolean
 

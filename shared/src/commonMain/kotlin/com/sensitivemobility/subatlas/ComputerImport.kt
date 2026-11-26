@@ -97,6 +97,13 @@ internal class ComputerImport(
     /** L'adresse de l'ordinateur de l'import en cours (ou du dernier). */
     val address: String? get() = computer?.address
 
+    /** L'import en cours (ou le dernier) a-t-il réussi à se connecter à l'ordinateur ? */
+    var connected by mutableStateOf(false)
+        private set
+
+    /** Un import est en train d'utiliser le Bluetooth (de la connexion à l'ajout au carnet, confirmation comprise). */
+    val busy: Boolean get() = stage != Stage.IDLE && stage != Stage.NONE && stage != Stage.DONE && stage != Stage.FAILED
+
     /**
      * Lance la recherche des nouvelles plongées de [c] (détection de l'ordinateur, bouton ou association). Sans effet si un import est en
      * cours. [opened] est la session de l'association, déjà connectée ([openedLog] : ce qu'elle a journalisé) : l'ordinateur n'accepte
@@ -110,6 +117,7 @@ internal class ComputerImport(
             return
         }
         computer = c
+        connected = opened != null
         title = c.displayName
         stage = if (opened == null) Stage.CONNECTING else Stage.READING
         progress = if (opened == null) strings().computerImportConnecting(c.displayName) else strings().computerImportReading
@@ -127,6 +135,7 @@ internal class ComputerImport(
             try {
                 if (opened == null) {
                     s.open()
+                    connected = true
                     stage = Stage.READING
                     progress = strings().computerImportReading
                 }
@@ -271,58 +280,69 @@ internal fun ComputerWatcher(state: AppState, actions: PlatformActions, importer
 }
 
 /**
- * Guette un ordinateur. La détection ne se redéclenche pas tant qu'il reste à portée : il faut qu'il disparaisse un moment (Bluetooth
- * coupé sur l'ordinateur) pour qu'une nouvelle apparition compte.
+ * Guette un ordinateur et lance l'import à chacune de ses apparitions (voir [ComputerArming]). Armée, la détection attend de le
+ * voir ; désarmée (il vient d'être importé et reste annoncé), elle l'écoute jusqu'à ce qu'il se taise.
  */
 @Composable
 private fun WatchComputer(computer: DiveComputer, ble: BleTransport, actions: PlatformActions, importer: ComputerImport) {
     val foreground by actions.appInForeground.collectAsState()
     val watch = remember { ComputerArming() }
     val locked = ComputerLock.holders > 0
+    val busy = importer.busy
+    val connected = importer.connected
     // La case « import automatique » peut changer pendant la veille : c'est le réglage du moment qui compte.
     val current by rememberUpdatedState(computer)
-    LaunchedEffect(foreground, locked) {
+    // Relancée à chaque début et fin d'import : une écoute ne se poursuit jamais pendant une connexion, où l'ordinateur se tait.
+    LaunchedEffect(foreground, locked, busy, connected) {
         if (!foreground || locked) return@LaunchedEffect
         // De retour dans l'appli longtemps après le dernier import : une nouvelle apparition compte de nouveau.
         if (Clock.System.now().toEpochMilliseconds() - importer.lastEnd > REARM_AFTER_MS) watch.rearm()
-        while (isActive) {
-            if (!importer.idle) {
-                if (importer.address == current.address) watch.imported()
-                delay(500)
-                continue
+        if (busy) {
+            if (importer.address == current.address) {
+                watch.imported(hidden = connected && driverFor(current)?.hidesAfterConnection == true)
             }
-            val seen = try {
-                ble.waitForDevice(current.address, if (watch.armed) 60_000 else 15_000)
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            try {
+                if (!watch.armed) {
+                    ble.waitForDeparture(current.address, SILENCE_MS)
+                    watch.sighting(false)
+                } else if (!importer.idle) {
+                    // La fenêtre du résultat est encore ouverte : l'import suivant attend qu'elle se ferme.
+                    delay(500)
+                } else if (ble.waitForDevice(current.address, 60_000) && importer.idle && ComputerLock.holders == 0) {
+                    if (watch.sighting(true)) importer.start(current)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 delay(5_000)
-                false
             }
-            // Un import a pu commencer pendant la recherche : il sera noté au tour suivant.
-            if (!importer.idle || ComputerLock.holders > 0) continue
-            if (watch.sighting(seen)) importer.start(current)
-            // Toujours à portée (un Mares continue de s'annoncer après la connexion) : on attend avant de regarder à nouveau. Des
-            // recherches enchaînées sont refusées par Android, et l'ordinateur semblerait alors parti.
-            else if (seen) delay(RESCAN_PAUSE_MS)
         }
     }
 }
 
 private const val REARM_AFTER_MS = 5 * 60_000L
-private const val RESCAN_PAUSE_MS = 15_000L
+
+/** Sans nouvelle de lui pendant ce temps, un ordinateur écouté en continu a coupé son Bluetooth. */
+private const val SILENCE_MS = 5_000L
 
 /**
- * Quand la détection d'un ordinateur doit lancer un import : à son apparition, une seule fois. Après un import (quel qu'en soit le
- * déclencheur), il faut qu'il ait disparu pour qu'une nouvelle apparition compte.
+ * Quand la détection d'un ordinateur doit lancer un import : une fois par apparition. Après un import (quel qu'en soit le
+ * déclencheur), un ordinateur qui reste annoncé doit d'abord disparaître ; un ordinateur qui se tait de lui-même après la connexion
+ * compte de nouveau dès qu'on le revoit.
  */
 internal class ComputerArming {
     var armed = true
         private set
 
-    /** Un import de cet ordinateur a lieu : détection, bouton ou association. */
-    fun imported() {
-        armed = false
+    /**
+     * Un import de cet ordinateur a lieu : détection, bouton ou association. [hidden] : la connexion l'a fait taire, il ne
+     * réapparaîtra que si l'utilisateur réactive son Bluetooth.
+     */
+    fun imported(hidden: Boolean) {
+        armed = hidden
     }
 
     fun rearm() {

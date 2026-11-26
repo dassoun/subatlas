@@ -112,6 +112,35 @@ class AndroidBle(
         }
     }
 
+    override suspend fun waitForDeparture(address: String, silenceMs: Long) {
+        val bluetooth = adapter
+        val scanner = bluetooth?.takeIf { it.isEnabled && granted() }?.bluetoothLeScanner
+        if (scanner == null) {
+            delay(silenceMs)
+            return
+        }
+        val sightings = Channel<Unit>(Channel.CONFLATED)
+        val callback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                sightings.trySend(Unit)
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                sightings.close(IOException("recherche refusée (code $errorCode)"))
+            }
+        }
+        val filter = ScanFilter.Builder().setDeviceAddress(address).build()
+        // Mode rapide : en mode équilibré, les trous entre deux écoutes ressembleraient à une coupure. Il ne dure que tant que
+        // l'ordinateur reste annoncé après un import.
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        scanner.startScan(listOf(filter), settings, callback)
+        try {
+            while (withTimeoutOrNull(silenceMs) { sightings.receive() } != null) Unit
+        } finally {
+            runCatching { scanner.stopScan(callback) }
+        }
+    }
+
     override suspend fun connect(address: String, log: (String) -> Unit): BleConnection {
         val bluetooth = adapter ?: throw IOException("Bluetooth indisponible")
         val connection = AndroidBleConnection(context, bluetooth.getRemoteDevice(address), log)

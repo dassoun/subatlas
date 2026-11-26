@@ -35,9 +35,17 @@ de plongée (voir « Autres modèles »).
 - **Une connexion par activation du Bluetooth** (vu le 25 novembre 2026 sur un Perdix, V102 Classic) : après une coupure, même propre,
   l'ordinateur ne se signale plus et la connexion suivante échoue (« ordinateur introuvable ») tant que son Bluetooth n'est pas quitté
   puis réactivé. L'association **enchaîne donc l'import sur sa propre connexion**, sans la fermer.
-- **Un import par apparition** (vu le 26 novembre 2026 sur un Sirius) : un Mares continue de s'annoncer après la connexion. Tout import
-  (détection, bouton, association) désarme la détection jusqu'à ce que l'ordinateur disparaisse, et la détection marque une pause entre
-  deux recherches : enchaînées, Android les refuse (« scanning too frequently »), l'appareil semblait parti et l'import repartait en boucle.
+- **Comportement voulu pour tout ordinateur** (confirmé le 26 novembre 2026) : relancer le Bluetooth de l'ordinateur, SubAtlas ouverte,
+  affiche de lui-même la liste des nouvelles plongées ; sans relance, rien ne repart après un import. À vérifier pour chaque marque.
+  Sur un Mares, une coupure de 5 s au moins est nécessaire.
+- **Un import par apparition** (26 novembre 2026), selon `ComputerDriver.hidesAfterConnection` :
+  - un **Mares** continue de s'annoncer après la connexion : tout import (détection, bouton, association) désarme la détection jusqu'à ce
+    que l'ordinateur disparaisse ;
+  - un **Shearwater** se tait après la connexion : il compte de nouveau dès qu'on le revoit, c'est-à-dire dès que son Bluetooth est
+    réactivé, même aussitôt (exiger d'abord une disparition observée empêchait la détection après un import sur un Peregrine) ;
+  - désarmée, la détection écoute l'ordinateur **sans interruption** (`BleTransport.waitForDeparture`) et le tient pour parti après
+    5 s de silence : une coupure brève suffit. Pas de recherches courtes enchaînées : Android les refuse (« scanning too frequently »),
+    l'appareil semblait parti et l'import repartait en boucle.
 - **Noms selon l'appareil** (demandé le 25 novembre 2026) : la section et les messages portent le modèle de l'ordinateur connecté
   (`DiveComputer.displayName`), jamais un modèle écrit en dur. Une seule section, avec un bloc par ordinateur associé (plusieurs
   possibles depuis le 26 novembre 2026).

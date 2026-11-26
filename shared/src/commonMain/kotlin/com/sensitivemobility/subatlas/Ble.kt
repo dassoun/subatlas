@@ -38,6 +38,12 @@ interface BleTransport {
      */
     suspend fun waitForDevice(address: String, timeoutMs: Long): Boolean
 
+    /**
+     * Écoute l'appareil d'adresse [address] sans interruption et rend la main dès qu'il n'a plus été vu pendant [silenceMs] (Bluetooth
+     * coupé sur l'appareil, ou sur le téléphone). Une seule recherche, aussi longue qu'il faut. Annulable.
+     */
+    suspend fun waitForDeparture(address: String, silenceMs: Long)
+
     /** Se connecte à l'appareil [address], découvre ses services et active les notifications. Lève une exception en cas d'échec. */
     suspend fun connect(address: String, log: (String) -> Unit): BleConnection
 

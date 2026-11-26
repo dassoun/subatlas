@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 /** Les ordinateurs Shearwater (Peregrine, Perdix, Teric, Tern, Petrel 3…). */
 internal object ShearwaterDriver : ComputerDriver {
     override val family = DiveComputer.SHEARWATER
+    override val hidesAfterConnection = true
 
     /** Le service « série » de Shearwater, ou un nom de la marque (l'appareil n'annonce pas toujours son service). */
     override fun recognizes(device: BleFound): Boolean =
