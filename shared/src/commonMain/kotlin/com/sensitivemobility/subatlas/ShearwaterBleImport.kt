@@ -7,8 +7,8 @@ import kotlin.math.round
 import kotlin.time.Instant
 
 /**
- * Plongées téléchargées en Bluetooth depuis un ordinateur Shearwater, converties en [ShearwaterDive] : même aperçu, même fusion et
- * même application que les autres imports (voir `AppState.planShearwaterImport`).
+ * Plongées téléchargées en Bluetooth depuis un ordinateur Shearwater, converties en [ImportedDive] : même aperçu, même fusion et
+ * même application que les autres imports (voir `AppState.planImport`).
  *
  * Les données de l'ordinateur sont le flux « PNF » décompressé que Shearwater Cloud garde dans son export : enregistrements de 32
  * octets, ceux de type 0x01 sont les échantillons (voir `ShearwaterImport.pnfProfileFromRecords`). Le sommaire de l'appareil donne
@@ -88,7 +88,7 @@ internal object ShearwaterBleImport {
     }
 
     /** Convertit une plongée téléchargée (enregistrements décompressés) ; `null` si elle ne contient pas d'échantillons. */
-    fun toDive(entry: ShearwaterManifestEntry, raw: ByteArray, serial: String, modelId: Int?): ShearwaterDive? {
+    fun toDive(entry: ShearwaterManifestEntry, raw: ByteArray, serial: String, modelId: Int?): ImportedDive? {
         if (raw.size < ShearwaterBle.RECORD_SIZE) return null
         // Octet 8 de l'enregistrement d'ouverture : 0 = unités métriques, 1 = impériales.
         val imperial = raw[8].toInt() == 1
@@ -145,7 +145,7 @@ internal object ShearwaterBleImport {
             )
         } + unused.map { (o2, he) -> Tank(o2Percent = o2, hePercent = he) }
 
-        return ShearwaterDive(
+        return ImportedDive(
             key = key(serial, entry),
             modified = "",
             date = date,

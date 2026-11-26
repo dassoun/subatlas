@@ -224,6 +224,7 @@ interface Strings {
     val computerImportLater: String
     fun computerImportFailed(detail: String): String
     val computerImportRestartHint: String
+    fun computerImportUnreadable(n: Int): String
     fun computerAssociateFailed(detail: String): String
     fun bleLost(detail: String): String
     val bleRestart: String
@@ -240,7 +241,7 @@ interface Strings {
     val shearwaterNone: String
     val shearwaterInvalid: String
     val shearwaterConfirm: String
-    fun shearwaterDone(created: Int, merged: Int): String
+    fun importDone(created: Int, merged: Int): String
     val shearwaterNewTag: String
     val shearwaterMergeTag: String
     val shearwaterMergeHelp: String
@@ -697,9 +698,9 @@ object FrStrings : Strings {
     override fun computerForgetMessage(label: String) = "L'association avec $label sera effacée. Les plongées déjà importées sont conservées ; il faudra associer à nouveau l'ordinateur pour le retrouver sans recherche."
     override val computerForgetConfirm = "Dissocier"
     override val associateTitle = "Associer un ordinateur"
-    override val associateIntro = "Activez le Bluetooth sur l'ordinateur et fermez Shearwater Cloud, puis touchez votre ordinateur dans la liste."
+    override val associateIntro = "Activez le Bluetooth sur l'ordinateur et fermez l'application du fabricant (Shearwater Cloud, Mares…), puis touchez votre ordinateur dans la liste."
     override val associateChecking = "Vérification de l'ordinateur…"
-    override val associateNone = "Aucun ordinateur Shearwater trouvé. Vérifiez que son Bluetooth est activé et qu'il est à portée, puis recherchez à nouveau."
+    override val associateNone = "Aucun ordinateur de plongée reconnu. Vérifiez que son Bluetooth est activé et qu'il est à portée, puis recherchez à nouveau."
     override val associateShowAll = "Afficher tous les appareils Bluetooth"
     override val computerAuto = "Importer automatiquement les nouvelles plongées"
     override val computerAutoHint = "Sans demander de confirmation : une jauge et un message indiquent le traitement en cours."
@@ -714,8 +715,9 @@ object FrStrings : Strings {
     override val computerImportLater = "Plus tard"
     override fun computerImportFailed(detail: String) = "Import interrompu ($detail)."
     override val computerImportRestartHint = "Sur l'ordinateur, quittez le mode Bluetooth, réactivez-le, puis réessayez."
-    override fun associateSeen(n: Int) = if (n == 0) "Aucun appareil Bluetooth vu : vérifiez que le Bluetooth et la localisation du téléphone sont activés." else "$n appareil${if (n > 1) "s" else ""} Bluetooth vu${if (n > 1) "s" else ""}, aucun n'est reconnu comme un ordinateur Shearwater."
-    override fun computerAssociateFailed(detail: String) = "Cet appareil n'a pas répondu comme un ordinateur Shearwater ($detail)."
+    override fun computerImportUnreadable(n: Int) = if (n > 1) "$n plongées n'ont pas pu être lues." else "1 plongée n'a pas pu être lue."
+    override fun associateSeen(n: Int) = if (n == 0) "Aucun appareil Bluetooth vu : vérifiez que le Bluetooth et la localisation du téléphone sont activés." else "$n appareil${if (n > 1) "s" else ""} Bluetooth vu${if (n > 1) "s" else ""}, aucun n'est reconnu comme un ordinateur de plongée pris en charge."
+    override fun computerAssociateFailed(detail: String) = "Cet appareil n'a pas répondu comme un ordinateur de plongée pris en charge ($detail)."
     override fun bleLost(detail: String) = "Connexion interrompue ($detail). L'ordinateur arrête de transmettre dès que la liaison est coupée : rapprochez-le, rallumez son Bluetooth si besoin, puis touchez « Recommencer ». Les plongées déjà lues peuvent être importées."
     override val bleRestart = "Recommencer"
     override fun bleImportRead(n: Int) = "Importer les $n lue${if (n > 1) "s" else ""}"
@@ -732,7 +734,7 @@ object FrStrings : Strings {
     override val shearwaterNone = "Aucune plongée trouvée dans ce fichier."
     override val shearwaterInvalid = "Ce fichier n'est pas un export Shearwater Cloud lisible."
     override val shearwaterConfirm = "Importer"
-    override fun shearwaterDone(created: Int, merged: Int) =
+    override fun importDone(created: Int, merged: Int) =
         "$created plongée${if (created > 1) "s" else ""} ajoutée${if (created > 1) "s" else ""}, $merged fusionnée${if (merged > 1) "s" else ""}."
     override val shearwaterNewTag = "nouvelle"
     override val shearwaterMergeTag = "fusion"
@@ -1283,9 +1285,9 @@ object EnStrings : Strings {
     override fun computerForgetMessage(label: String) = "The pairing with $label will be erased. Dives already imported are kept; you will need to pair the computer again to find it without searching."
     override val computerForgetConfirm = "Unpair"
     override val associateTitle = "Pair a computer"
-    override val associateIntro = "Turn on the computer's Bluetooth and close Shearwater Cloud, then tap your computer in the list."
+    override val associateIntro = "Turn on the computer's Bluetooth and close the maker's app (Shearwater Cloud, Mares…), then tap your computer in the list."
     override val associateChecking = "Checking the computer…"
-    override val associateNone = "No Shearwater computer found. Check that its Bluetooth is on and that it is within range, then search again."
+    override val associateNone = "No supported dive computer found. Check that its Bluetooth is on and that it is within range, then search again."
     override val associateShowAll = "Show all Bluetooth devices"
     override val computerAuto = "Import new dives automatically"
     override val computerAutoHint = "Without asking for confirmation: a gauge and a message show what is being processed."
@@ -1300,8 +1302,9 @@ object EnStrings : Strings {
     override val computerImportLater = "Later"
     override fun computerImportFailed(detail: String) = "Import interrupted ($detail)."
     override val computerImportRestartHint = "On the computer, leave Bluetooth mode, turn it on again, then retry."
-    override fun associateSeen(n: Int) = if (n == 0) "No Bluetooth device seen: check that the phone's Bluetooth and location are on." else "$n Bluetooth device${if (n != 1) "s" else ""} seen, none recognised as a Shearwater computer."
-    override fun computerAssociateFailed(detail: String) = "This device did not answer like a Shearwater computer ($detail)."
+    override fun computerImportUnreadable(n: Int) = if (n != 1) "$n dives could not be read." else "1 dive could not be read."
+    override fun associateSeen(n: Int) = if (n == 0) "No Bluetooth device seen: check that the phone's Bluetooth and location are on." else "$n Bluetooth device${if (n != 1) "s" else ""} seen, none recognised as a supported dive computer."
+    override fun computerAssociateFailed(detail: String) = "This device did not answer like a supported dive computer ($detail)."
     override fun bleLost(detail: String) = "Connection lost ($detail). The computer stops transmitting as soon as the link is cut: bring it closer, turn its Bluetooth back on if needed, then tap “Start over”. The dives already read can be imported."
     override val bleRestart = "Start over"
     override fun bleImportRead(n: Int) = "Import the $n already read"
@@ -1318,7 +1321,7 @@ object EnStrings : Strings {
     override val shearwaterNone = "No dive found in this file."
     override val shearwaterInvalid = "This file is not a readable Shearwater Cloud export."
     override val shearwaterConfirm = "Import"
-    override fun shearwaterDone(created: Int, merged: Int) = "$created dive${if (created != 1) "s" else ""} added, $merged merged."
+    override fun importDone(created: Int, merged: Int) = "$created dive${if (created != 1) "s" else ""} added, $merged merged."
     override val shearwaterNewTag = "new"
     override val shearwaterMergeTag = "merge"
     override val shearwaterMergeHelp =

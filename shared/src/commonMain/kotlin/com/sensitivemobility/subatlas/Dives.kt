@@ -284,7 +284,7 @@ internal fun DiveList(
 internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
     val s = LocalStrings.current
     val scope = rememberCoroutineScope()
-    var plan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var plan by remember { mutableStateOf<List<ImportPlanItem>?>(null) }
     var planSkipped by remember { mutableStateOf(0) }
     var siteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
     var declined by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -314,7 +314,7 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
                     message = s.shearwaterNone
                 } else {
                     planSkipped = file.skipped
-                    val newPlan = state.planShearwaterImport(file.dives)
+                    val newPlan = state.planImport(file.dives)
                     siteMatches = state.similarSiteMatches(newPlan)
                     declined = emptySet()
                     plan = newPlan
@@ -342,7 +342,7 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
                 onDives = { list ->
                     bleOpen = false
                     planSkipped = 0
-                    val newPlan = state.planShearwaterImport(list)
+                    val newPlan = state.planImport(list)
                     siteMatches = state.similarSiteMatches(newPlan)
                     declined = emptySet()
                     plan = newPlan
@@ -353,16 +353,16 @@ internal fun DiveImportButtons(state: AppState, actions: PlatformActions) {
     }
     if (reading) ReadingDialog()
     plan?.let { items ->
-        ShearwaterPlanDialog(
+        ImportPlanDialog(
             items,
             planSkipped,
             siteMatches = siteMatches,
             declined = declined,
             onToggle = { declined = if (it in declined) declined - it else declined + it },
             onConfirm = {
-                val (created, merged) = state.applyShearwaterImport(items, declined)
+                val (created, merged) = state.applyImport(items, declined)
                 plan = null
-                message = s.shearwaterDone(created, merged)
+                message = s.importDone(created, merged)
             },
             onDismiss = { plan = null },
         )
@@ -411,8 +411,8 @@ internal fun AppState.diveNumber(id: Long): Int = dives.sortedWith(diveOrder).re
 
 /** Aperçu de l'import : ce qui sera ajouté et ce qui sera fusionné avec une plongée du carnet. */
 @Composable
-internal fun ShearwaterPlanDialog(
-    items: List<ShearwaterPlanItem>,
+internal fun ImportPlanDialog(
+    items: List<ImportPlanItem>,
     skipped: Int,
     siteMatches: List<Pair<String, DiveSite>>,
     declined: Set<String>,
@@ -427,7 +427,7 @@ internal fun ShearwaterPlanDialog(
     var showPresent by remember { mutableStateOf(false) }
 
     @Composable
-    fun PlanRow(item: ShearwaterPlanItem, tag: String, color: androidx.compose.ui.graphics.Color) {
+    fun PlanRow(item: ImportPlanItem, tag: String, color: androidx.compose.ui.graphics.Color) {
         val sw = item.dive
         Column {
             Text(

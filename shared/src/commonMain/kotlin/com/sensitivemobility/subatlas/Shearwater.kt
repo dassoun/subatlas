@@ -12,46 +12,6 @@ import kotlin.math.abs
 import kotlin.math.round
 import kotlin.math.roundToInt
 
-/** Une plongée lue dans un export Shearwater Cloud, avant d'être ajoutée au carnet. */
-internal class ShearwaterDive(
-    /** Identifiant stable (`shearwater:` + identifiant Shearwater) : réimporter le même fichier ne crée pas de doublon. */
-    val key: String,
-    /** Date de dernière modification de la plongée dans Shearwater Cloud (« 2026-11-03 07:15:13 »), vide si absente. */
-    val modified: String,
-    val date: String,
-    val startTime: String?,
-    val endTime: String?,
-    val durationSeconds: Int?,
-    val siteName: String,
-    val country: String,
-    val siteNotes: String,
-    val latitude: Double?,
-    val longitude: Double?,
-    val maxDepth: Double?,
-    val avgDepth: Double?,
-    val waterTempC: Double?,
-    val tanks: List<Tank>,
-    val weightKg: Double?,
-    val suitType: SuitType?,
-    val notes: String,
-    val buddy: String,
-    val visibilityMeters: Int?,
-    val computer: String,
-    val profile: DiveProfile?,
-    /** Plongée lue dans un export Dive Logs Data (divelogs.de) : même aperçu et même fusion, avec ses propres règles (voir `mergeDivelogs`). */
-    val fromDivelogs: Boolean = false,
-    /** Plongée lue dans un fichier UDDF : mêmes règles de fusion que Divelogs (rien d'écrasé, courbe déjà importée gardée). */
-    val fromUddf: Boolean = false,
-    /** Plongée téléchargée en Bluetooth depuis l'ordinateur (voir `ShearwaterBleImport`) : mêmes règles de fusion que Divelogs. */
-    val fromDevice: Boolean = false,
-) {
-    /**
-     * Une source qui complète le carnet (Divelogs, UDDF, ordinateur en Bluetooth) plutôt qu'un export Shearwater Cloud : sa fusion ne
-     * touche pas à ce qui y est, et peut rejoindre une plongée déjà importée d'ailleurs.
-     */
-    val fromLogbook: Boolean get() = fromDivelogs || fromUddf || fromDevice
-}
-
 /**
  * Lecture d'un export « Shearwater Cloud » (fichier `.db` SQLite). Les métadonnées sont dans `dive_details`, le profil
  * (un échantillon toutes les quelques secondes) dans `log_data`, au format binaire Shearwater « PNF » compressé en gzip.
@@ -62,10 +22,7 @@ internal object ShearwaterImport {
     private const val PSI_TO_BAR = 0.0689476
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Plongées lues, et nombre de plongées du fichier qu'on n'a pas pu lire. */
-    class ShearwaterFile(val dives: List<ShearwaterDive>, val skipped: Int)
-
-    fun parse(bytes: ByteArray): ShearwaterFile {
+    fun parse(bytes: ByteArray): ImportedFile {
         val db = try {
             SqliteFile(bytes)
         } catch (e: IllegalArgumentException) {
@@ -83,7 +40,7 @@ internal object ShearwaterImport {
             if (dive == null) skipped++
             dive
         }
-        return ShearwaterFile(dives, skipped)
+        return ImportedFile(dives, skipped)
     }
 
     private fun convert(
@@ -91,7 +48,7 @@ internal object ShearwaterImport {
         d: Map<String, Any?>,
         log: Map<String, Any?>?,
         knownSites: Map<String, Map<String, Any?>>,
-    ): ShearwaterDive? {
+    ): ImportedDive? {
         val dateTime = d["DiveDate"].str().trim().replace('T', ' ')
         if (dateTime.length < 10) return null
         val date = dateTime.substring(0, 10)
@@ -126,7 +83,7 @@ internal object ShearwaterImport {
         val imperial = meta3?.num("UnitSystem")?.toInt() == 1
         val tanks = tanks(tankJson, d["TankSize"].str())
 
-        return ShearwaterDive(
+        return ImportedDive(
             key = "shearwater:$id",
             modified = d["LastModified"].str().trim(),
             date = date,

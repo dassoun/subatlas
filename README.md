@@ -142,7 +142,7 @@ capteur de la bouteille 1 alimente la courbe de pression ; les exports en unité
 ## Import Dive Logs Data (divelogs.de)
 Le bouton « Importer Dive Logs Data » (Réglages > Données) lit un export `.DLD` : une archive ZIP (lue par `ZipReader`, en Kotlin
 pur, comme le gzip de Shearwater) qui contient un fichier XML par plongée (`DivelogsImport.kt`). Chaque plongée est convertie en
-`ShearwaterDive` (marquée `fromDivelogs`) : l'**aperçu** (nouvelles / à fusionner, sites au nom proche rattachables un à un), la
+`ImportedDive` (marquée `fromDivelogs`) : l'**aperçu** (nouvelles / à fusionner, sites au nom proche rattachables un à un), la
 **fusion** et l'application sont ceux de l'import Shearwater, et un fichier envoyé à l'appli (« Partager » / « Ouvrir avec ») est
 reconnu à son en-tête ZIP.
 - **Lu** : date, heure (fin déduite de la durée), durée, profondeurs max et moyenne, site et ville (le ville va dans les notes du
@@ -174,7 +174,7 @@ températures en **kelvins**, pressions en **pascals**, volumes de bouteille en 
 - **Importer** : Réglages > Données > « Importer un fichier UDDF », ou un fichier UDDF envoyé à l'appli (« Partager > SubAtlas » /
   « Ouvrir avec ») : il est reconnu à son contenu (déclaration XML puis balise `<uddf`), pas à son extension. Le lecteur XML
   (`Xml.kt`) est écrit en Kotlin pur, donc identique sur Android et iOS ; `UddfImport.kt` convertit chaque plongée en
-  `ShearwaterDive` (marquée `fromUddf`) : **aperçu**, rattachement des sites au nom proche et **fusion** sont ceux de l'import
+  `ImportedDive` (marquée `fromUddf`) : **aperçu**, rattachement des sites au nom proche et **fusion** sont ceux de l'import
   Dive Logs Data (rien d'écrasé, courbe et ordinateur déjà importés conservés, position GPS du site complétée) et une
   confirmation est demandée avant d'agir.
 - **Tolérance** : les logiciels s'écartent souvent du standard, donc une valeur qui n'a pas la bonne grandeur est reconnue
@@ -201,7 +201,7 @@ confirmation) : une plongée du carnet à la même date et à moins d'une heure 
 gardée), sinon une nouvelle plongée est créée, sans site (l'ordinateur ne connaît ni le site, ni les notes, ni le binôme).
 Les relevés bruts sont enregistrés dans `files/ble/` (`manifest.bin`, `dive-<empreinte>.bin`) et un journal visible, partageable, décrit
 chaque échange.
-- `ShearwaterBleImport.kt` : une plongée téléchargée devient un `ShearwaterDive` (marquée `fromDevice`) : date et heure du sommaire (horloge de
+- `ShearwaterBleImport.kt` : une plongée téléchargée devient un `ImportedDive` (marquée `fromDevice`) : date et heure du sommaire (horloge de
   l'ordinateur), durée, profondeur max, moyenne et température calculées sur les échantillons immergés, mélange respiré (octets 8 et 9 de
   chaque échantillon) avec pression de début et de fin si l'émetteur était allumé, courbe complète par le décodeur « PNF » de l'import
   Shearwater Cloud, ordinateur « Peregrine TX (977D8B42) ».
@@ -264,10 +264,11 @@ changent : les données restent enregistrées en métrique (`Units.kt`, lu par t
 
 ## Association d'un ordinateur de plongée (Android)
 Réglages > « Importer depuis un ordinateur de plongée » (`ComputerSettings.kt`, parcours voulu dans `docs/import-ordinateur-plongee.md`).
-Un seul ordinateur Shearwater associé à la fois ; la section, les boutons et les messages portent **le modèle lu dans l'appareil**
-(« Perdix AI », « Peregrine TX » ; modèle inconnu : son nom Bluetooth) :
+Plusieurs ordinateurs peuvent être associés (Shearwater, Mares), un bloc chacun ; les boutons et les messages portent **le modèle lu
+dans l'appareil** (« Perdix AI », « Sirius » ; modèle inconnu : son nom Bluetooth). Organisation du code par marque : voir le document
+cité.
 - **Associer un ordinateur de plongée** : la recherche Bluetooth démarre à l'ouverture de la fenêtre (l'ordinateur doit avoir son Bluetooth
-  activé, Shearwater Cloud fermé) ; on le touche dans la liste (seuls les ordinateurs Shearwater sont montrés, avec un lien « Afficher
+  activé, Shearwater Cloud fermé) ; on le touche dans la liste (seuls les ordinateurs reconnus sont montrés, avec un lien « Afficher
   tous les appareils Bluetooth »). L'appli s'y connecte pour lire son numéro de série, son modèle et son firmware (preuve
   que c'est un ordinateur Shearwater) puis **enregistre l'association** dans les réglages : `Settings.computers` (`DiveComputer` : adresse
   Bluetooth, nom, modèle, série, firmware, famille de protocole). La section affiche alors « Peregrine TX (977D8B42) · V104 Classic ».
@@ -300,6 +301,19 @@ Un seul ordinateur Shearwater associé à la fois ; la section, les boutons et l
 - **Vérifié** : sur ton Peregrine TX, l'association (recherche, identité, enregistrement ; le Peregrine annonce son service Bluetooth
   Shearwater et son nom) ; sur l'émulateur, la section, la case, la fenêtre (connexion, erreur « ordinateur introuvable »), Dissocier.
   **Non vérifié** : la détection et l'import complet depuis cet écran avec un vrai Peregrine.
+
+## Mares Sirius en Bluetooth (Android)
+Même bouton et même parcours que les Shearwater. `MaresBle.kt` : le protocole de libdivecomputer (`mares_iconhd.c`, paquets de taille
+variable sur le service `544e326b-5b72-c6b0-1c46-41c1bc448118`), lectures seules : identité, nombre de plongées, en-tête et mesures de
+chaque plongée. L'ordinateur n'a pas de sommaire : la liste lit l'en-tête de toutes ses plongées. `MaresDive.kt` : le format décrit par
+`mares_iconhd_parser.c` (une mesure toutes les 5 s, somme de contrôle par enregistrement) converti en plongée du carnet : profondeurs,
+température moyenne sous l'eau, courbe avec LND et paliers, pressions des émetteurs, changements de gaz, une bouteille par gaz respiré
+ou activé. Le délai de fin de plongée en surface est retiré de la durée. Relevés bruts dans `files/ble/` (`mares-*.bin`).
+- **Vérifié sur un Sirius (26 novembre 2026)** : association et import des 54 plongées (janvier 2023 à novembre 2026), toutes lues. Les 39
+  plongées aussi présentes dans un export UDDF (Subsurface) concordent : mêmes courbes point par point, heures, profondeurs max et
+  mélanges. Écarts : pression de fin sur quelques plongées (SubAtlas prend celle de l'en-tête de l'ordinateur, 2 à 3 bar sous la dernière
+  mesure que retient l'export), une pression de début (3 bar) et une durée (1,7 min). Non essayé : plongée à plusieurs gaz, unités
+  impériales, apnée, autres modèles Mares.
 
 ## Photos de plongée
 - **Ajout** : « Ajouter des photos » (sous les notes de la fiche, ou la tuile « + » de la rangée de vignettes quand il y en a

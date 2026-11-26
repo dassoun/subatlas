@@ -20,9 +20,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +40,7 @@ import kotlin.time.Clock
 /**
  * Import des nouvelles plongées d'un ordinateur de plongée associé (voir docs/import-ordinateur-plongee.md) : connexion, lecture du
  * sommaire, puis, selon le réglage de l'ordinateur, une confirmation de l'utilisateur ou un import automatique, avec jauge et messages.
- * Les plongées lues sont ajoutées au carnet avec l'import habituel (`AppState.planShearwaterImport` / `applyShearwaterImport`).
+ * Les plongées lues sont ajoutées au carnet avec l'import habituel (`AppState.planImport` / `applyImport`).
  */
 internal class ComputerImport(
     private val state: AppState,
@@ -68,7 +70,7 @@ internal class ComputerImport(
         private set
 
     /** Les plongées nouvelles proposées à l'utilisateur, et celles qu'il a cochées (index du sommaire). */
-    val fresh = mutableStateListOf<ShearwaterManifestEntry>()
+    val fresh = mutableStateListOf<ComputerDive>()
     val selected = mutableStateListOf<Int>()
 
     /** Instant (ms) de la fin du dernier import : la détection ne se redéclenche pas aussitôt. */
@@ -76,7 +78,7 @@ internal class ComputerImport(
         private set
 
     private var computer: DiveComputer? = null
-    private var session: ShearwaterSession? = null
+    private var session: ComputerSession? = null
     private var job: Job? = null
 
     /** Le journal des échanges avec l'ordinateur : partageable depuis la fenêtre en cas d'échec. */
@@ -92,14 +94,18 @@ internal class ComputerImport(
 
     val idle: Boolean get() = stage == Stage.IDLE
 
+    /** L'adresse de l'ordinateur de l'import en cours (ou du dernier). */
+    val address: String? get() = computer?.address
+
     /**
      * Lance la recherche des nouvelles plongées de [c] (détection de l'ordinateur, bouton ou association). Sans effet si un import est en
      * cours. [opened] est la session de l'association, déjà connectée ([openedLog] : ce qu'elle a journalisé) : l'ordinateur n'accepte
      * qu'une connexion par activation de son Bluetooth, il ne faut donc pas la fermer pour en rouvrir une.
      */
-    fun start(c: DiveComputer, opened: ShearwaterSession? = null, openedLog: List<String> = emptyList()) {
+    fun start(c: DiveComputer, opened: ComputerSession? = null, openedLog: List<String> = emptyList()) {
         val ble = actions.ble
-        if (ble == null || stage != Stage.IDLE) {
+        val driver = driverFor(c)
+        if (ble == null || driver == null || stage != Stage.IDLE) {
             opened?.close()
             return
         }
@@ -113,7 +119,7 @@ internal class ComputerImport(
         selected.clear()
         journal.clear()
         journal.addAll(openedLog)
-        val s = opened ?: ShearwaterSession(ble, c.address)
+        val s = opened ?: driver.session(ble, c.address)
         s.log = ::note
         session = s
         job = scope.launch {
@@ -124,8 +130,9 @@ internal class ComputerImport(
                     stage = Stage.READING
                     progress = strings().computerImportReading
                 }
-                val entries = s.manifest { n -> progress = "${strings().computerImportReading} ($n)" }
-                val news = s.fresh(entries, state.dives.toList())
+                val listed = s.dives { n -> progress = "${strings().computerImportReading} ($n)" }
+                val logbook = state.dives.toList()
+                val news = listed.filter { !s.isImported(it, logbook) }
                 when {
                     news.isEmpty() -> {
                         s.close()
@@ -172,12 +179,13 @@ internal class ComputerImport(
         }
     }
 
-    private suspend fun downloadAndApply(s: ShearwaterSession, picks: List<ShearwaterManifestEntry>) {
+    private suspend fun downloadAndApply(s: ComputerSession, picks: List<ComputerDive>) {
         stage = Stage.DOWNLOADING
-        val total = picks.sumOf { ShearwaterSession.expectedSize(it) }
+        val total = picks.sumOf { it.expectedBytes }
         var done = 0L
-        val dives = ArrayList<ShearwaterDive>()
+        val dives = ArrayList<ImportedDive>()
         var failure: String? = null
+        var unreadable = 0
         try {
             picks.forEachIndexed { i, e ->
                 fun report(f: Float) {
@@ -185,9 +193,9 @@ internal class ComputerImport(
                     progress = strings().bleProgress(i + 1, picks.size, (f.coerceIn(0f, 1f) * 100).toInt())
                 }
                 report(done.toFloat() / total)
-                val raw = s.download(e) { n -> report((done + minOf(n.toLong(), ShearwaterSession.expectedSize(e))).toFloat() / total) }
-                done += ShearwaterSession.expectedSize(e)
-                s.toDive(e, raw)?.let { dives += it }
+                val dive = s.download(e) { n -> report((done + minOf(n, e.expectedBytes)).toFloat() / total) }
+                done += e.expectedBytes
+                if (dive != null) dives += dive else unreadable++
             }
         } catch (e: CancellationException) {
             throw e
@@ -202,12 +210,14 @@ internal class ComputerImport(
             stage = Stage.APPLYING
             fraction = null
             progress = strings().computerImportApplying
-            val plan = state.planShearwaterImport(dives)
-            val (created, merged) = state.applyShearwaterImport(plan)
-            text = strings().shearwaterDone(created, merged)
+            val plan = state.planImport(dives)
+            val (created, merged) = state.applyImport(plan)
+            text = strings().importDone(created, merged)
         }
-        if (failure != null) {
-            finish(Stage.FAILED, strings().computerImportFailed(failure) + if (text.isNotEmpty()) " $text" else "", failed = true)
+        if (unreadable > 0) text = "$text ${strings().computerImportUnreadable(unreadable)}".trim()
+        if (failure != null || (dives.isEmpty() && unreadable > 0)) {
+            val cause = failure?.let { strings().computerImportFailed(it) }
+            finish(Stage.FAILED, listOfNotNull(cause, text.ifEmpty { null }).joinToString(" "), failed = true)
         } else {
             finish(Stage.DONE, text.ifEmpty { strings().computerImportNone(title) })
         }
@@ -249,45 +259,85 @@ internal fun HoldComputerLock() {
 }
 
 /**
- * La détection de l'ordinateur associé, **tant que l'appli est ouverte** : elle guette son adresse Bluetooth (recherche filtrée) et lance
- * l'import dès qu'il apparaît (Bluetooth activé sur l'ordinateur). Elle ne se redéclenche pas tant que l'ordinateur reste à portée :
- * il faut qu'il disparaisse un moment (Bluetooth coupé sur l'ordinateur) pour qu'une nouvelle apparition compte.
+ * La détection des ordinateurs associés, **tant que l'appli est ouverte** : chacun est guetté à son adresse Bluetooth (recherche
+ * filtrée) et son import démarre dès qu'il apparaît (Bluetooth activé sur l'ordinateur).
  */
 @Composable
 internal fun ComputerWatcher(state: AppState, actions: PlatformActions, importer: ComputerImport) {
     val ble = actions.ble ?: return
-    val computer = state.settings.computers.firstOrNull { it.family == DiveComputer.SHEARWATER } ?: return
+    for (computer in state.settings.computers) {
+        key(computer.address) { WatchComputer(computer, ble, actions, importer) }
+    }
+}
+
+/**
+ * Guette un ordinateur. La détection ne se redéclenche pas tant qu'il reste à portée : il faut qu'il disparaisse un moment (Bluetooth
+ * coupé sur l'ordinateur) pour qu'une nouvelle apparition compte.
+ */
+@Composable
+private fun WatchComputer(computer: DiveComputer, ble: BleTransport, actions: PlatformActions, importer: ComputerImport) {
     val foreground by actions.appInForeground.collectAsState()
-    val armed = remember(computer.address) { booleanArrayOf(true) }
+    val watch = remember { ComputerArming() }
     val locked = ComputerLock.holders > 0
-    LaunchedEffect(computer.address, foreground, locked) {
+    // La case « import automatique » peut changer pendant la veille : c'est le réglage du moment qui compte.
+    val current by rememberUpdatedState(computer)
+    LaunchedEffect(foreground, locked) {
         if (!foreground || locked) return@LaunchedEffect
         // De retour dans l'appli longtemps après le dernier import : une nouvelle apparition compte de nouveau.
-        if (Clock.System.now().toEpochMilliseconds() - importer.lastEnd > REARM_AFTER_MS) armed[0] = true
+        if (Clock.System.now().toEpochMilliseconds() - importer.lastEnd > REARM_AFTER_MS) watch.rearm()
         while (isActive) {
             if (!importer.idle) {
+                if (importer.address == current.address) watch.imported()
                 delay(500)
                 continue
             }
             val seen = try {
-                ble.waitForDevice(computer.address, if (armed[0]) 60_000 else 15_000)
+                ble.waitForDevice(current.address, if (watch.armed) 60_000 else 15_000)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 delay(5_000)
                 false
             }
-            if (armed[0] && seen && importer.idle && ComputerLock.holders == 0) {
-                armed[0] = false
-                importer.start(computer)
-            } else if (!armed[0] && !seen) {
-                armed[0] = true
-            }
+            // Un import a pu commencer pendant la recherche : il sera noté au tour suivant.
+            if (!importer.idle || ComputerLock.holders > 0) continue
+            if (watch.sighting(seen)) importer.start(current)
+            // Toujours à portée (un Mares continue de s'annoncer après la connexion) : on attend avant de regarder à nouveau. Des
+            // recherches enchaînées sont refusées par Android, et l'ordinateur semblerait alors parti.
+            else if (seen) delay(RESCAN_PAUSE_MS)
         }
     }
 }
 
 private const val REARM_AFTER_MS = 5 * 60_000L
+private const val RESCAN_PAUSE_MS = 15_000L
+
+/**
+ * Quand la détection d'un ordinateur doit lancer un import : à son apparition, une seule fois. Après un import (quel qu'en soit le
+ * déclencheur), il faut qu'il ait disparu pour qu'une nouvelle apparition compte.
+ */
+internal class ComputerArming {
+    var armed = true
+        private set
+
+    /** Un import de cet ordinateur a lieu : détection, bouton ou association. */
+    fun imported() {
+        armed = false
+    }
+
+    fun rearm() {
+        armed = true
+    }
+
+    /** Le résultat d'une recherche ; `true` s'il faut lancer l'import. */
+    fun sighting(seen: Boolean): Boolean {
+        if (!seen) {
+            armed = true
+            return false
+        }
+        return armed.also { armed = false }
+    }
+}
 
 @Composable
 internal fun ComputerImportDialog(importer: ComputerImport) {
@@ -321,14 +371,13 @@ internal fun ComputerImportDialog(importer: ComputerImport) {
                             TextButton(onClick = { importer.selected.clear() }) { Text(s.bleSelectNone) }
                         }
                         for (e in importer.fresh) {
-                            val (date, time) = ShearwaterBleImport.dateTime(e.fingerprint)
                             Row(
                                 Modifier.fillMaxWidth().clickable { if (e.index in importer.selected) importer.selected.remove(e.index) else importer.selected.add(e.index) },
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Checkbox(checked = e.index in importer.selected, onCheckedChange = null)
                                 Text(
-                                    "${s.dateText(date)} $time · ${e.durationSeconds / 60} min · max ${units.depth.text(e.maxDepthDm / 10.0)}",
+                                    "${s.dateText(e.date)} ${e.startTime} · ${e.durationSeconds / 60} min · max ${units.depth.text(e.maxDepthMeters)}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
                                 )

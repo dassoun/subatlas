@@ -6,13 +6,9 @@ class BleFound(
     val name: String,
     val address: String,
     val rssi: Int,
-    /** Services annoncés (UUID en minuscules), s'il y en a : le Peregrine se reconnaît à son service même sans nom. */
+    /** Services annoncés (UUID en minuscules), s'il y en a : un ordinateur de plongée se reconnaît au sien (voir `ComputerDriver`). */
     val services: List<String> = emptyList(),
-) {
-    /** Un ordinateur Shearwater : le nom « Peregrine » ou le service série de Shearwater. */
-    val isShearwater: Boolean
-        get() = name.contains("peregrine", ignoreCase = true) || services.any { it == "fe25c237-0ece-443c-b0aa-e02033e7029d" || it == "1aa44039-1667-4b29-87cc-dfecaaf31d97" }
-}
+)
 
 /** Une connexion ouverte à un appareil : un canal d'écriture et un canal de notifications (le « port série » Bluetooth). */
 interface BleConnection {

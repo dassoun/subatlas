@@ -7,8 +7,8 @@ import kotlin.math.roundToInt
  * Lecture d'un export « Dive Logs Data » de divelogs.de (fichier `.DLD`) : une archive ZIP qui contient un fichier XML par plongée
  * (date, heure, site, profondeurs, bouteilles, notes, position GPS du site et, souvent, les échantillons de la courbe).
  *
- * Chaque plongée est convertie en [ShearwaterDive] marquée [ShearwaterDive.fromDivelogs] : l'aperçu, la fusion avec le carnet et
- * l'application de l'import sont ceux de l'import Shearwater (voir `AppState.planShearwaterImport`).
+ * Chaque plongée est convertie en [ImportedDive] marquée [ImportedDive.fromDivelogs] : l'aperçu, la fusion avec le carnet et
+ * l'application de l'import sont ceux de l'import Shearwater (voir `AppState.planImport`).
  */
 internal object DivelogsImport {
     class NotDivelogsException : Exception()
@@ -16,7 +16,7 @@ internal object DivelogsImport {
     /** Un fichier ZIP commence par « PK » : c'est ce qui distingue un export Dive Logs Data d'un export Shearwater (SQLite). */
     fun looksLikeZip(bytes: ByteArray): Boolean = bytes.size > 3 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()
 
-    fun parse(bytes: ByteArray): ShearwaterImport.ShearwaterFile {
+    fun parse(bytes: ByteArray): ImportedFile {
         val entries = try {
             ZipReader.entries(bytes)
         } catch (e: Exception) {
@@ -28,7 +28,7 @@ internal object DivelogsImport {
         if (xmls.isEmpty()) throw NotDivelogsException()
         var skipped = 0
         val dives = xmls.mapNotNull { xml -> parseDive(xml).also { if (it == null) skipped++ } }
-        return ShearwaterImport.ShearwaterFile(dives, skipped)
+        return ImportedFile(dives, skipped)
     }
 
     /** « France Toulon » -> (« France », « Toulon ») : le pays d'abord (un à trois mots), puis la ville. */
@@ -38,7 +38,7 @@ internal object DivelogsImport {
         return words.take(countryWords).joinToString(" ") to words.drop(countryWords).joinToString(" ")
     }
 
-    private fun parseDive(xml: String): ShearwaterDive? {
+    private fun parseDive(xml: String): ImportedDive? {
         val id = tag(xml, "DIVELOGSID")?.takeIf { it.isNotBlank() } ?: tag(xml, "DIVELOGSDIVENUMBER") ?: return null
         // « 29.04.2015 » -> « 2015-04-29 »
         val dmy = (tag(xml, "DATE") ?: return null).split('.')
@@ -59,7 +59,7 @@ internal object DivelogsImport {
         val tanks = listOfNotNull(tank(mainBlock)) + extraTanks.mapNotNull { tank(it) }
 
         val computer = tag(xml, "COMPUTERMODEL").orEmpty().trim().takeIf { !it.contains("Dummy", ignoreCase = true) }.orEmpty()
-        return ShearwaterDive(
+        return ImportedDive(
             key = "divelogs:$id",
             modified = "",
             date = date,

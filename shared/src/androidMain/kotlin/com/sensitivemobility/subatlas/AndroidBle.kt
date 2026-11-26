@@ -221,8 +221,8 @@ private class AndroidBleConnection(
             log("service ${s.uuid}")
             for (c in s.characteristics) log("  caractéristique ${c.uuid} propriétés ${properties(c.properties)}")
         }
-        // Le service « série » de Shearwater, sinon le premier qui sait notifier et recevoir des écritures.
-        val service = services.firstOrNull { it.uuid in SHEARWATER_SERVICES }
+        // Le service « série » d'un ordinateur connu (Shearwater, Mares), sinon le premier qui sait notifier et recevoir des écritures.
+        val service = services.firstOrNull { it.uuid in SERIAL_SERVICES }
             ?: services.firstOrNull { s ->
                 s.characteristics.any { it.properties and NOTIFY_MASK != 0 } && s.characteristics.any { it.properties and WRITE_MASK != 0 }
             }
@@ -305,10 +305,11 @@ private class AndroidBleConnection(
 
     private companion object {
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        // Services « série » de Shearwater : Perdix, Teric, Peregrine, Tern ; Perdix 3.
-        val SHEARWATER_SERVICES = setOf(
+        // Services « série » de Shearwater (Perdix, Teric, Peregrine, Tern ; Perdix 3) et de Mares (Sirius).
+        val SERIAL_SERVICES = setOf(
             UUID.fromString("fe25c237-0ece-443c-b0aa-e02033e7029d"),
             UUID.fromString("1aa44039-1667-4b29-87cc-dfecaaf31d97"),
+            UUID.fromString(MaresBle.SERVICE),
         )
         const val NOTIFY_MASK = BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE
         const val WRITE_MASK = BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE

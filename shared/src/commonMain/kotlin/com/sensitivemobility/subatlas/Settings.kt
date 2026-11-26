@@ -52,7 +52,7 @@ data class DiveComputer(
     val model: String,
     val serial: String,
     val firmware: String = "",
-    /** Famille de protocole : [SHEARWATER]. */
+    /** Famille de protocole (le pilote qui sait le lire) : [SHEARWATER] ou [MARES]. */
     val family: String = SHEARWATER,
     /** Importer les nouvelles plongées sans demander de confirmation quand l'ordinateur est détecté. */
     val autoImport: Boolean = false,
@@ -60,12 +60,17 @@ data class DiveComputer(
     /** Le nom employé dans les écrans : le modèle lu dans l'appareil, sinon son nom Bluetooth (modèle inconnu). */
     val displayName: String get() = model.takeIf { it.isNotBlank() && it != "Shearwater" } ?: name.ifBlank { "Shearwater" }
 
+    /** La même association : même appareil à la même adresse, ou même marque et même numéro de série. */
+    fun sameDevice(other: DiveComputer): Boolean =
+        address == other.address || (family == other.family && serial.isNotBlank() && serial == other.serial)
+
     /** « Peregrine TX (977D8B42) · V104 Classic ». */
     fun label(): String = listOf("$model${serial.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()}", firmware.takeIf { it.isNotBlank() })
         .filterNotNull().joinToString(" · ")
 
     companion object {
         const val SHEARWATER = "shearwater"
+        const val MARES = "mares"
     }
 }
 

@@ -8,8 +8,8 @@ import kotlin.math.roundToInt
  * Lecture d'un fichier UDDF (Universal Dive Data Format, uddf.org) : le format XML d'échange de carnets de plongée, que lisent
  * et écrivent Subsurface, MacDive, divelogs.de, Shearwater Cloud et beaucoup d'autres.
  *
- * Chaque plongée est convertie en [ShearwaterDive] marquée [ShearwaterDive.fromUddf] : l'aperçu, la fusion avec le carnet et
- * l'application de l'import sont ceux des autres imports (voir `AppState.planShearwaterImport`).
+ * Chaque plongée est convertie en [ImportedDive] marquée [ImportedDive.fromUddf] : l'aperçu, la fusion avec le carnet et
+ * l'application de l'import sont ceux des autres imports (voir `AppState.planImport`).
  *
  * Le format est lu avec tolérance : le standard impose des unités SI (profondeurs en m, durées en s, températures en kelvins,
  * pressions en pascals, volumes en m³, fractions de gaz entre 0 et 1), mais les logiciels s'en écartent. Une valeur qui n'a pas
@@ -48,7 +48,7 @@ internal object UddfImport {
         return head.startsWith("<") && "<uddf" in head
     }
 
-    fun parse(bytes: ByteArray): ShearwaterImport.ShearwaterFile {
+    fun parse(bytes: ByteArray): ImportedFile {
         if (!looksLikeUddf(bytes)) throw NotUddfException()
         val root = try {
             Xml.parse(bytes.decodeToString().removePrefix("﻿"))
@@ -73,7 +73,7 @@ internal object UddfImport {
             if (dive == null) skipped++
             dive
         }
-        return ShearwaterImport.ShearwaterFile(dives, skipped)
+        return ImportedFile(dives, skipped)
     }
 
     private fun parseDive(
@@ -83,7 +83,7 @@ internal object UddfImport {
         computers: Map<String, XmlNode>,
         mixes: Map<String, XmlNode>,
         fromDivelogs: Boolean,
-    ): ShearwaterDive? {
+    ): ImportedDive? {
         val before = node.child("informationbeforedive")
         val after = node.child("informationafterdive")
 
@@ -124,7 +124,7 @@ internal object UddfImport {
         val id = node.attrs["id"]?.takeIf { it.isNotBlank() } ?: before?.str("divenumber") ?: "$date $time"
         val key = if (fromDivelogs && id.startsWith("dive_")) "divelogs:${id.removePrefix("dive_")}" else "uddf:$id"
 
-        return ShearwaterDive(
+        return ImportedDive(
             key = key,
             modified = "",
             date = date,

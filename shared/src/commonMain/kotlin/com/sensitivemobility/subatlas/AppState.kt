@@ -19,7 +19,7 @@ internal val diveOrder: Comparator<Dive> =
     compareByDescending<Dive> { it.date }.thenByDescending { it.startTime.orEmpty() }.thenByDescending { it.id }
 
 /** Une plongée d'un export Shearwater et la plongée du carnet avec laquelle elle sera fusionnée (`null` : nouvelle). */
-internal class ShearwaterPlanItem(val dive: ShearwaterDive, val mergeInto: Dive?) {
+internal class ImportPlanItem(val dive: ImportedDive, val mergeInto: Dive?) {
     /**
      * Plongée déjà créée ou fusionnée à partir de cet export, et inchangée dans Shearwater depuis (même date de dernière
      * modification que celle mémorisée à l'import) : rien à refaire. Une plongée importée avant que la date soit mémorisée
@@ -254,14 +254,14 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
      * source, sinon celle du même jour dont l'heure de début est la plus proche (à moins d'une heure), sinon la seule
      * plongée du jour sans heure sur le même site. `null` : nouvelle plongée.
      */
-    internal fun planShearwaterImport(list: List<ShearwaterDive>): List<ShearwaterPlanItem> {
+    internal fun planImport(list: List<ImportedDive>): List<ImportPlanItem> {
         val taken = HashSet<Long>()
         var stamped = false
         val plan = list.sortedByDescending { it.date + " " + it.startTime.orEmpty() }.map { sw ->
             // Une plongée issue d'une fusion porte plusieurs clés : chacune la retrouve, sans en refaire une nouvelle.
             val match = dives.firstOrNull { sw.key in it.importKeys() } ?: closestByTime(sw, taken)
             if (match != null) taken += match.id
-            val item = ShearwaterPlanItem(sw, match)
+            val item = ImportPlanItem(sw, match)
             // Plongée importée avant la mémorisation des dates et déjà à jour : on mémorise la date de l'export, pour
             // repérer plus tard une modification faite dans Shearwater.
             if (match != null && item.alreadyDone && sw.modified.isNotEmpty() && match.importModified[sw.key] == null) {
@@ -274,7 +274,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         return plan
     }
 
-    private fun closestByTime(sw: ShearwaterDive, taken: Set<Long>): Dive? {
+    private fun closestByTime(sw: ImportedDive, taken: Set<Long>): Dive? {
         val swStart = minutesOfDay(sw.startTime)
         // Un export Divelogs se fusionne aussi avec une plongée déjà importée d'ailleurs (Shearwater) : c'est la même plongée.
         val sameDay = dives.filter { it.date == sw.date && it.id !in taken && (sw.fromLogbook || it.importKey.isEmpty()) }
@@ -291,7 +291,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /** Applique l'import : renvoie (plongées créées, plongées fusionnées). */
-    internal fun applyShearwaterImport(plan: List<ShearwaterPlanItem>, declined: Set<String> = emptySet()): Pair<Int, Int> {
+    internal fun applyImport(plan: List<ImportPlanItem>, declined: Set<String> = emptySet()): Pair<Int, Int> {
         var created = 0
         var merged = 0
         for (item in plan) {
@@ -308,7 +308,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
             }
             val existing = item.mergeInto?.let { dive(it.id) ?: it }
             if (existing != null) {
-                val result = if (item.dive.fromLogbook) mergeDivelogs(existing, item.dive) else mergeShearwater(existing, item.dive)
+                val result = if (item.dive.fromLogbook) mergeDivelogs(existing, item.dive) else mergeDive(existing, item.dive)
                 saveDive(result.copy(importModified = existing.importModified + result.importModified + (item.dive.key to item.dive.modified)), persist = false)
                 // Divelogs donne la position du site de chaque plongée : un site du carnet encore sans position la reçoit.
                 if (item.dive.fromLogbook) completeSitePosition(result.siteId, item.dive)
@@ -324,7 +324,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         return created to merged
     }
 
-    private fun siteName(sw: ShearwaterDive) = sw.siteName.ifBlank { sw.siteNotes.ifBlank { sw.country.ifBlank { "Shearwater" } } }
+    private fun siteName(sw: ImportedDive) = sw.siteName.ifBlank { sw.siteNotes.ifBlank { sw.country.ifBlank { sw.fallbackSiteName } } }
 
     private fun exactSite(name: String, country: String): DiveSite? = sites.firstOrNull {
         it.name.equals(name, ignoreCase = true) && (it.country.isBlank() || country.isBlank() || it.country.equals(country, ignoreCase = true))
@@ -342,7 +342,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         .maxWithOrNull(compareBy<DiveSite> { siteNameSimilarity(it.name, name) }.thenBy { it.latitude != null })
 
     /** Les sites de l'export qui seront rattachés à un site existant au nom proche : (nom dans l'export, site du carnet). */
-    internal fun similarSiteMatches(plan: List<ShearwaterPlanItem>): List<Pair<String, DiveSite>> = plan
+    internal fun similarSiteMatches(plan: List<ImportPlanItem>): List<Pair<String, DiveSite>> = plan
         .filter { it.mergeInto == null && !it.alreadyDone }
         .map { it.dive }
         .distinctBy { siteName(it).lowercase() }
@@ -353,7 +353,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         }
 
     /** [declined] : noms (en minuscules) des sites de l'export dont l'utilisateur refuse le rattachement à un site proche. */
-    private fun siteFor(sw: ShearwaterDive, declined: Set<String>): DiveSite {
+    private fun siteFor(sw: ImportedDive, declined: Set<String>): DiveSite {
         val name = siteName(sw)
         val found = exactSite(name, sw.country) ?: if (name.lowercase() !in declined) similarSiteFor(name, sw.country, sw.latitude, sw.longitude) else null
         if (found != null) {
@@ -371,7 +371,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
         ).also { saveSite(it, persist = false) }
     }
 
-    private fun newDiveFrom(sw: ShearwaterDive, declined: Set<String>): Dive = Dive(
+    private fun newDiveFrom(sw: ImportedDive, declined: Set<String>): Dive = Dive(
         id = newId(),
         siteId = siteFor(sw, declined).id,
         date = sw.date,
@@ -393,7 +393,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     )
 
     /** Complète la plongée du carnet avec les données de l'ordinateur, sans écraser ce que l'utilisateur a saisi. */
-    private fun mergeShearwater(d: Dive, sw: ShearwaterDive): Dive {
+    private fun mergeDive(d: Dive, sw: ImportedDive): Dive {
         // Plongée issue d'une fusion : sa courbe et ses heures sont déjà complètes.
         if (d.importKeys().size > 1) return d
         val tanks = d.tanks.toMutableList()
@@ -442,7 +442,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
     }
 
     /** Donne au site la position de la plongée importée s'il n'en a pas (et son pays s'il n'en a pas). */
-    private fun completeSitePosition(siteId: Long, sw: ShearwaterDive) {
+    private fun completeSitePosition(siteId: Long, sw: ImportedDive) {
         val site = site(siteId) ?: return
         val la = sw.latitude
         val lo = sw.longitude
@@ -456,7 +456,7 @@ class AppState(private val storage: Storage, private val systemLanguage: String)
      * écrasé. En plus : la courbe et l'ordinateur d'une plongée déjà importée de Shearwater sont gardés (leur courbe est plus riche :
      * LND, paliers, CNS), et la source Divelogs s'ajoute à celles de la plongée, pour qu'un second import ne la refasse pas.
      */
-    private fun mergeDivelogs(d: Dive, dl: ShearwaterDive): Dive = mergeShearwater(d, dl).copy(
+    private fun mergeDivelogs(d: Dive, dl: ImportedDive): Dive = mergeDive(d, dl).copy(
         computer = d.computer.ifBlank { dl.computer },
         profile = d.profile ?: dl.profile,
         importKey = (d.importKeys() + dl.key).distinct().joinToString("\n"),

@@ -45,7 +45,7 @@ internal fun ShearwaterBleDialog(
     ble: BleTransport,
     actions: PlatformActions,
     state: AppState,
-    onDives: (List<ShearwaterDive>) -> Unit,
+    onDives: (List<ImportedDive>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val s = LocalStrings.current
@@ -70,7 +70,7 @@ internal fun ShearwaterBleDialog(
     var modelId by remember { mutableStateOf<Int?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     // Plongées déjà lues (et leur index dans le sommaire) : une coupure en cours de route ne les fait pas relire.
-    val downloaded = remember { mutableStateListOf<ShearwaterDive>() }
+    val downloaded = remember { mutableStateListOf<ImportedDive>() }
     val downloadedIndexes = remember { mutableStateListOf<Int>() }
 
     fun log(line: String) {

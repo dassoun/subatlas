@@ -175,7 +175,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
     var pendingImport by remember { mutableStateOf<ImportData?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var sharedIncoming by remember { mutableStateOf<SharedDive?>(null) }
-    var incomingPlan by remember { mutableStateOf<List<ShearwaterPlanItem>?>(null) }
+    var incomingPlan by remember { mutableStateOf<List<ImportPlanItem>?>(null) }
     var incomingDiveFile by remember { mutableStateOf<DiveFile?>(null) }
     var incomingSkipped by remember { mutableStateOf(0) }
     var incomingSiteMatches by remember { mutableStateOf<List<Pair<String, DiveSite>>>(emptyList()) }
@@ -259,7 +259,7 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
                         notice = strings.shearwaterNone
                     } else {
                         incomingSkipped = file.skipped
-                        val newPlan = state.planShearwaterImport(file.dives)
+                        val newPlan = state.planImport(file.dives)
                         incomingSiteMatches = state.similarSiteMatches(newPlan)
                         incomingDeclined = emptySet()
                         incomingPlan = newPlan
@@ -634,17 +634,17 @@ private fun AppContent(storage: Storage, location: LocationProvider, actions: Pl
             )
         }
         incomingPlan?.let { items ->
-            ShearwaterPlanDialog(
+            ImportPlanDialog(
                 items,
                 incomingSkipped,
                 siteMatches = incomingSiteMatches,
                 declined = incomingDeclined,
                 onToggle = { incomingDeclined = if (it in incomingDeclined) incomingDeclined - it else incomingDeclined + it },
                 onConfirm = {
-                    val (created, merged) = state.applyShearwaterImport(items, incomingDeclined)
+                    val (created, merged) = state.applyImport(items, incomingDeclined)
                     incomingPlan = null
                     goTab(Screen.Dives)
-                    notice = strings.shearwaterDone(created, merged)
+                    notice = strings.importDone(created, merged)
                 },
                 onDismiss = { incomingPlan = null },
             )

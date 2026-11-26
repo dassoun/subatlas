@@ -15,7 +15,7 @@ de plongée (voir « Autres modèles »).
    l'import directement, sans nouvelle recherche ni choix de l'appareil.
 3. **Import avec confirmation (par défaut)** : seules les **nouvelles plongées** sont proposées (celles qui ne sont pas déjà dans le
    carnet : clé `shearwater-ble:<série>:<heure>` ou plongée Shearwater Cloud du même jour, à moins d'une heure, à 0,3 m près) ; l'utilisateur
-   **confirme** l'import, qui passe par l'aperçu habituel (`ShearwaterPlanDialog`).
+   **confirme** l'import, qui passe par l'aperçu habituel (`ImportPlanDialog`).
 4. **Case « Importer automatiquement les nouvelles plongées »** : cochée, l'import se fait **sans demander de confirmation**. Une **jauge de
    progression** et un **message du traitement en cours** (connexion, lecture du sommaire, « Plongée 2 sur 3 · 40 % », ajout au carnet)
    doivent apparaître. À la fin, un message récapitulatif (« 3 plongées ajoutées, 1 fusionnée »).
@@ -35,8 +35,12 @@ de plongée (voir « Autres modèles »).
 - **Une connexion par activation du Bluetooth** (vu le 25 novembre 2026 sur un Perdix, V102 Classic) : après une coupure, même propre,
   l'ordinateur ne se signale plus et la connexion suivante échoue (« ordinateur introuvable ») tant que son Bluetooth n'est pas quitté
   puis réactivé. L'association **enchaîne donc l'import sur sa propre connexion**, sans la fermer.
+- **Un import par apparition** (vu le 26 novembre 2026 sur un Sirius) : un Mares continue de s'annoncer après la connexion. Tout import
+  (détection, bouton, association) désarme la détection jusqu'à ce que l'ordinateur disparaisse, et la détection marque une pause entre
+  deux recherches : enchaînées, Android les refuse (« scanning too frequently »), l'appareil semblait parti et l'import repartait en boucle.
 - **Noms selon l'appareil** (demandé le 25 novembre 2026) : la section et les messages portent le modèle de l'ordinateur connecté
-  (`DiveComputer.displayName`), jamais un modèle écrit en dur. Une seule section sert à tous les Shearwater.
+  (`DiveComputer.displayName`), jamais un modèle écrit en dur. Une seule section, avec un bloc par ordinateur associé (plusieurs
+  possibles depuis le 26 novembre 2026).
 - **Écran allumé** pendant un téléchargement (`PlatformActions.setKeepScreenOn`, déjà en place).
 - Tout fichier ou donnée qui modifie le carnet demande confirmation, **sauf** quand la case d'import automatique est cochée (c'est son objet).
 
@@ -60,20 +64,22 @@ l'adresse) tant qu'elle est au premier plan, et propose l'import dès que le Per
    porte la connexion et le téléchargement.
 3. **Case « Importer automatiquement les nouvelles plongées »** (réalisée, même remarque) : import sans confirmation, avec jauge et messages.
 
-## Autres modèles d'ordinateurs
+## Organisation du code (demandée le 26 novembre 2026)
 
-Quand l'utilisateur demandera l'import Bluetooth d'un autre modèle (Mares Sirius, etc. ; les Shearwater, dont le Perdix, passent déjà par la même section), **suivre ce même parcours** : une
-nouvelle section de modèle sous « Importer depuis un ordinateur de plongée », avec Associer / Dissocier / import automatique. Ce que
-chaque modèle apporte (le reste est commun) :
+Un seul bouton « Associer un ordinateur de plongée » et un seul parcours pour toutes les marques ; le code de chaque marque est à part.
 
-- le **filtre de recherche** (nom Bluetooth, service) et l'identification du modèle ;
-- le **protocole** de lecture (sommaire des plongées, téléchargement) : pour les Shearwater, `ShearwaterBle.kt` ; les autres sont à écrire
-  (voir libdivecomputer pour les protocoles connus) ;
-- la **conversion** d'une plongée téléchargée en `ShearwaterDive` (voir `ShearwaterBleImport.toDive`), puis l'aperçu et la fusion habituels ;
-- la détection des **plongées déjà dans le carnet**.
+| Rôle | Commun | Shearwater | Mares |
+| --- | --- | --- | --- |
+| Ce que l'appli voit d'un ordinateur (pilote, session, plongée listée) | `DiveComputers.kt` | `ShearwaterSession.kt` | `MaresSession.kt` |
+| Protocole Bluetooth | `Ble.kt`, `AndroidBle.kt` | `ShearwaterBle.kt` | `MaresBle.kt` |
+| Décodage d'une plongée | `ImportedDive.kt` (le résultat) | `ShearwaterBleImport.kt` | `MaresDive.kt` |
+| Écrans et détection | `ComputerSettings.kt`, `ComputerImport.kt` | | |
 
-Commun à tous les modèles : stockage des associations, écran de réglages, détection, import avec confirmation ou automatique, jauge,
-messages d'erreur, dissociation.
+**Ajouter une marque** : écrire son `ComputerDriver` (reconnaître l'appareil, ouvrir une `ComputerSession`), son protocole et son décodage
+vers `ImportedDive`, inscrire le pilote dans `computerDrivers` et son service Bluetooth dans `AndroidBle.SERIAL_SERVICES`. L'association,
+la détection, l'import avec confirmation ou automatique, la jauge, les messages et la dissociation sont communs.
+
+La fenêtre « Importer d'un Shearwater en Bluetooth » (`ShearwaterBleDialog.kt`) est antérieure et reste propre aux Shearwater.
 
 ## Déjà en place (octobre à novembre 2026)
 
